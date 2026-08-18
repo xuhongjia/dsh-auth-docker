@@ -1,0 +1,6 @@
+node_modules/
+lib/
+.env
+*.sqlite
+.DS_Store
+data/

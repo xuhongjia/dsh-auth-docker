@@ -1,0 +1,180 @@
+import { createServer } from 'node:http'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { once } from 'node:events'
+import { connect } from 'node:net'
+import type { AddressInfo } from 'node:net'
+import { afterEach, describe, expect, it } from 'vitest'
+import { DatabaseSync } from 'node:sqlite'
+import { createAuth, ensureDatabaseFile, migrateAuth, seedInitialUser } from '../src/auth.ts'
+import { resolveAuthConfig, safeRedirect } from '../src/config.ts'
+import { listenAuthGateway } from '../src/gateway.ts'
+
+const SECRET = 'dsh-auth-test-secret-value-32chars!'
+const PASSWORD = 'correct-horse-battery-staple'
+
+let root: string | undefined
+let gateway: Awaited<ReturnType<typeof listenAuthGateway>> | undefined
+let upstream: ReturnType<typeof createServer> | undefined
+const previousEnv: Record<string, string | undefined> = {}
+
+afterEach(async () => {
+  if (gateway !== undefined) {
+    await new Promise<void>((resolve) => { gateway!.server.close(() => { resolve() }) })
+    gateway = undefined
+  }
+  if (upstream !== undefined) {
+    await new Promise<void>((resolve) => { upstream!.close(() => { resolve() }) })
+    upstream = undefined
+  }
+  if (root !== undefined) {
+    await rm(root, { recursive: true, force: true })
+    root = undefined
+  }
+  for (const [key, value] of Object.entries(previousEnv)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+    delete previousEnv[key]
+  }
+})
+
+function setEnv(key: string, value: string): void {
+  if (!(key in previousEnv)) previousEnv[key] = process.env[key]
+  process.env[key] = value
+}
+
+async function boot(options?: { password?: string; existingDb?: string }): Promise<{ port: number; upstreamPort: number }> {
+  setEnv('DSH_AUTH_SECRET', SECRET)
+  if (options?.password !== undefined) setEnv('DSH_AUTH_PASSWORD', options.password)
+  else setEnv('DSH_AUTH_PASSWORD', PASSWORD)
+  root = await mkdtemp(join(tmpdir(), 'dsh-auth-'))
+  const path = options?.existingDb ?? join(root, 'auth.sqlite')
+  const config = resolveAuthConfig({
+    path,
+    listenHost: '127.0.0.1',
+    listenPort: 0,
+    baseURL: 'http://127.0.0.1',
+  })
+  await ensureDatabaseFile(config.path)
+  const db = new DatabaseSync(config.path)
+  const auth = createAuth(config, db)
+  await migrateAuth(auth)
+  await seedInitialUser(auth, db, config)
+
+  let captured = ''
+  upstream = createServer((req, res) => {
+    captured = `${req.method ?? ''} ${req.url ?? ''} host=${String(req.headers.host)} origin=${String(req.headers.origin)}`
+    res.writeHead(200, { 'content-type': 'text/plain' })
+    res.end(captured)
+  })
+  await new Promise<void>((resolve) => { upstream!.listen(0, '127.0.0.1', () => { resolve() }) })
+  const upstreamPort = (upstream.address() as AddressInfo).port
+  gateway = await listenAuthGateway({ ...config, baseURL: `http://127.0.0.1` }, auth, upstreamPort)
+  return { port: gateway.port, upstreamPort }
+}
+
+describe('dsh-auth reverse proxy', () => {
+  it('rejects a short signing secret at resolve time', () => {
+    setEnv('DSH_AUTH_SECRET', 'too-short')
+    expect(() => resolveAuthConfig({ path: '/tmp/x.sqlite' })).toThrow(/at least 32 characters/)
+  })
+
+  it('keeps redirects on the current origin', () => {
+    expect(safeRedirect('/sessions')).toBe('/sessions')
+    expect(safeRedirect('https://evil.example/')).toBe('/')
+    expect(safeRedirect('//evil.example')).toBe('/')
+    expect(safeRedirect(null)).toBe('/')
+  })
+
+  it('serves healthz and login without a session, and sends the SPA to login', { timeout: 20_000 }, async () => {
+    const { port } = await boot()
+    const health = await fetch(`http://127.0.0.1:${String(port)}/healthz`)
+    expect(health.status).toBe(200)
+    expect(await health.json()).toEqual({ status: 'ok' })
+
+    const login = await fetch(`http://127.0.0.1:${String(port)}/login`)
+    expect(login.status).toBe(200)
+    expect(await login.text()).toContain('DeepSeek Harness')
+
+    const home = await fetch(`http://127.0.0.1:${String(port)}/`, { redirect: 'manual' })
+    expect(home.status).toBe(302)
+    expect(home.headers.get('location')).toBe('/login?next=%2F')
+
+    const api = await fetch(`http://127.0.0.1:${String(port)}/api`, { method: 'POST' })
+    expect(api.status).toBe(401)
+  })
+
+  it('fails loud when the database is empty and the password env is missing', { timeout: 20_000 }, async () => {
+    setEnv('DSH_AUTH_SECRET', SECRET)
+    delete process.env.DSH_AUTH_PASSWORD
+    root = await mkdtemp(join(tmpdir(), 'dsh-auth-'))
+    const config = resolveAuthConfig({
+      path: join(root, 'auth.sqlite'),
+      listenHost: '127.0.0.1',
+      listenPort: 0,
+    })
+    await ensureDatabaseFile(config.path)
+    const db = new DatabaseSync(config.path)
+    const auth = createAuth(config, db)
+    await migrateAuth(auth)
+    await expect(seedInitialUser(auth, db, config)).rejects.toThrow(/DSH_AUTH_PASSWORD is required/)
+    db.close()
+  })
+
+  it('signs in through Better Auth and then proxies to loopback Harness', { timeout: 20_000 }, async () => {
+    const { port } = await boot()
+    const origin = 'http://127.0.0.1'
+    const login = await fetch(`http://127.0.0.1:${String(port)}/auth/sign-in/username`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin },
+      body: JSON.stringify({ username: 'admin', password: PASSWORD, callbackURL: '/' }),
+    })
+    expect(login.ok).toBe(true)
+    const cookie = login.headers.getSetCookie().join('; ')
+    expect(cookie.length).toBeGreaterThan(0)
+
+    const proxied = await fetch(`http://127.0.0.1:${String(port)}/workspace`, {
+      headers: { cookie, origin: 'http://evil.example' },
+    })
+    expect(proxied.status).toBe(200)
+    const body = await proxied.text()
+    expect(body).toContain('GET /workspace')
+    expect(body).toContain('host=127.0.0.1:')
+    expect(body).toContain('origin=undefined')
+  })
+
+  it('does not overwrite an existing user on later boots', { timeout: 20_000 }, async () => {
+    const first = await boot()
+    await new Promise<void>((resolve) => { gateway!.server.close(() => { resolve() }) })
+    gateway = undefined
+    await new Promise<void>((resolve) => { upstream!.close(() => { resolve() }) })
+    upstream = undefined
+    const dbPath = join(root!, 'auth.sqlite')
+    const second = await boot({ password: 'a-different-password-12', existingDb: dbPath })
+    const login = await fetch(`http://127.0.0.1:${String(second.port)}/auth/sign-in/username`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1' },
+      body: JSON.stringify({ username: 'admin', password: PASSWORD }),
+    })
+    expect(login.ok).toBe(true)
+  })
+
+  it('rejects unauthenticated upgrades', { timeout: 20_000 }, async () => {
+    const { port } = await boot()
+    const socket = connect(port, '127.0.0.1')
+    await once(socket, 'connect')
+    const response = once(socket, 'data')
+    socket.write([
+      'GET /events HTTP/1.1',
+      `Host: 127.0.0.1:${String(port)}`,
+      'Connection: Upgrade',
+      'Upgrade: websocket',
+      '',
+      '',
+    ].join('\r\n'))
+    const [data] = await response as [Buffer]
+    socket.destroy()
+    expect(String(data)).toContain('401 Unauthorized')
+  })
+})

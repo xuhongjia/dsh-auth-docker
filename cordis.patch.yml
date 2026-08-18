@@ -1,0 +1,25 @@
+# Official webserver stays on loopback. This layer owns the public port and
+# inserts Better Auth in front without forking DeepSeek Harness.
+- id: webserver
+  config:
+    host: '127.0.0.1'
+    port: 0
+
+- id: web-runtime
+  config:
+    printUrl: false
+    surfaceContext: true
+    trustedHosts: !!js ctx.webStartup.trustedHosts
+
+- insert:
+    - id: auth
+      name: dsh-auth
+      inject: [webServer]
+      config:
+        path: !!js dshHomePath('auth/auth.sqlite')
+        bootstrapPasswordEnv: DSH_AUTH_PASSWORD
+        secretEnv: DSH_AUTH_SECRET
+        listenHost: '0.0.0.0'
+        listenPort: !!js Number(process.env.PORT ?? 3080)
+        baseURL: !!js process.env.DSH_AUTH_BASE_URL
+        secureCookies: !!js process.env.DSH_AUTH_SECURE_COOKIES === '1'
