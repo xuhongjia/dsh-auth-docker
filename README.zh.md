@@ -23,7 +23,7 @@ docker compose up --build
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.1
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.2
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
