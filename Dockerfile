@@ -15,7 +15,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json cordis.patch.
 COPY src ./src
 RUN pnpm install \
   && pnpm build \
-  && pnpm prune --prod
+  && pnpm prune --prod --ignore-scripts
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
