@@ -5,7 +5,7 @@ import { fromNodeHeaders, toNodeHandler } from 'better-auth/node'
 import type { AuthInstance } from './auth.ts'
 import type { ResolvedAuthConfig } from './config.ts'
 import { safeRedirect } from './config.ts'
-import { loginPage } from './login-page.ts'
+import { LOGIN_CSP, loginPage } from './login-page.ts'
 import { proxyHttp, proxyUpgrade, rejectUpgrade } from './proxy.ts'
 
 /** Public reverse-proxy handle that sits in front of official DSH. */
@@ -97,7 +97,7 @@ async function handleLoginPage(
   const body = loginPage(config.basePath, next)
   res.writeHead(200, {
     'cache-control': 'no-store',
-    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+    'content-security-policy': LOGIN_CSP,
     'content-type': 'text/html; charset=utf-8',
     'x-content-type-options': 'nosniff',
   })

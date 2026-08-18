@@ -95,7 +95,8 @@ describe('dsh-auth reverse proxy', () => {
 
     const login = await fetch(`http://127.0.0.1:${String(port)}/login`)
     expect(login.status).toBe(200)
-    expect(await login.text()).toContain('DeepSeek Harness')
+    expect(login.headers.get('content-security-policy')).toContain("connect-src 'self'")
+    expect(await login.text()).toContain('/sign-in/username')
 
     const home = await fetch(`http://127.0.0.1:${String(port)}/`, { redirect: 'manual' })
     expect(home.status).toBe(302)

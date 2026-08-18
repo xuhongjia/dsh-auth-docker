@@ -1,6 +1,6 @@
 services:
   dsh:
-    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.1}
+    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.2}
     build: .
     ports:
       - "3080:3080"
@@ -9,6 +9,8 @@ services:
       DSH_AUTH_PASSWORD: ${DSH_AUTH_PASSWORD}
       DSH_AUTH_SECRET: ${DSH_AUTH_SECRET}
       DSH_AUTH_BASE_URL: ${DSH_AUTH_BASE_URL:-http://localhost:3080}
+      DSH_AUTH_SECURE_COOKIES: ${DSH_AUTH_SECURE_COOKIES:-}
+      DSH_AUTH_TRUSTED_ORIGINS: ${DSH_AUTH_TRUSTED_ORIGINS:-}
       PORT: "3080"
     volumes:
       - dsh-data:/data

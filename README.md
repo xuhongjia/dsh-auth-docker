@@ -16,19 +16,21 @@ docker compose up --build
 
 Open `http://localhost:3080`. The first boot creates `admin` from `DSH_AUTH_PASSWORD`. Later boots reuse `/data/auth/auth.sqlite` and ignore that password.
 
+Behind HTTPS (Caddy, nginx, Cloudflare), set `DSH_AUTH_BASE_URL` to that origin and `DSH_AUTH_SECURE_COOKIES=1`.
+
 ## Pull the published image
 
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.1
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.2
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.1
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.2
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -54,7 +56,7 @@ The public URL is printed as `dsh-auth: public http://0.0.0.0:3080 → 127.0.0.1
 | `DEEPSEEK_API_KEY` | Official Harness model key |
 | `DSH_AUTH_PASSWORD` | Initial admin password; read only when the auth database has no users |
 | `DSH_AUTH_SECRET` | Better Auth signing secret, at least 32 characters |
-| `DSH_AUTH_BASE_URL` | Public origin, for example `http://localhost:3080` |
+| `DSH_AUTH_BASE_URL` | Public origin, for example `http://localhost:3080` or `https://dsh.example.com` |
 | `DSH_AUTH_TRUSTED_ORIGINS` | Extra comma-separated origins Better Auth accepts |
 | `DSH_AUTH_SECURE_COOKIES` | Set `1` when the public origin is HTTPS |
 | `PORT` | Public listen port, default `3080` |

@@ -1,6 +1,20 @@
 /** Minimal unauthenticated page served before the official Web Client loads. */
 
 /**
+ * Login-page Content-Security-Policy.
+ * `connect-src 'self'` is required: the submit handler `fetch`es `/auth/sign-in/username`.
+ * `default-src 'none'` would otherwise block that request in the browser.
+ */
+export const LOGIN_CSP = [
+  "default-src 'none'",
+  "style-src 'unsafe-inline'",
+  "script-src 'unsafe-inline'",
+  "connect-src 'self'",
+  "form-action 'self'",
+  "base-uri 'none'",
+].join('; ')
+
+/**
  * Render the login page without external assets so unauthenticated requests
  * never reach the official Harness HTTP server.
  * @param authPath - Better Auth base path.

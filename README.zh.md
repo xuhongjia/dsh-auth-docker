@@ -16,6 +16,8 @@ docker compose up --build
 
 打开 `http://localhost:3080`。第一次启动会用 `DSH_AUTH_PASSWORD` 创建 `admin`。之后复用 `/data/auth/auth.sqlite`，不再读取该密码。
 
+若前面有 HTTPS 反代（Caddy、nginx、Cloudflare），把 `DSH_AUTH_BASE_URL` 设成该 origin，并设置 `DSH_AUTH_SECURE_COOKIES=1`。
+
 ## 拉取已发布镜像
 
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
@@ -28,7 +30,7 @@ ghcr.io/xuhongjia/dsh-auth-docker:latest
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.1
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.2
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d
@@ -54,7 +56,7 @@ dsh --profile web
 | `DEEPSEEK_API_KEY` | 官方 Harness 模型密钥 |
 | `DSH_AUTH_PASSWORD` | 初始管理员密码；仅在认证数据库没有用户时读取 |
 | `DSH_AUTH_SECRET` | Better Auth 签名密钥，至少 32 个字符 |
-| `DSH_AUTH_BASE_URL` | 公网 origin，例如 `http://localhost:3080` |
+| `DSH_AUTH_BASE_URL` | 公网 origin，例如 `http://localhost:3080` 或 `https://dsh.example.com` |
 | `DSH_AUTH_TRUSTED_ORIGINS` | Better Auth 额外接受的 origin，逗号分隔 |
 | `DSH_AUTH_SECURE_COOKIES` | 公网 origin 为 HTTPS 时设为 `1` |
 | `PORT` | 公网监听端口，默认 `3080` |
