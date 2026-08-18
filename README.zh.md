@@ -16,6 +16,23 @@ docker compose up --build
 
 打开 `http://localhost:3080`。第一次启动会用 `DSH_AUTH_PASSWORD` 创建 `admin`。之后复用 `/data/auth/auth.sqlite`，不再读取该密码。
 
+## 拉取已发布镜像
+
+推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
+
+```text
+ghcr.io/xuhongjia/dsh-auth-docker:latest
+```
+
+第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
+
+```sh
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:latest
+# 或使用上面同一份 .env：
+docker compose pull
+docker compose up -d
+```
+
 ## 安装到已有的官方 dsh
 
 ```sh

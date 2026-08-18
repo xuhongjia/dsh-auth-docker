@@ -16,6 +16,23 @@ docker compose up --build
 
 Open `http://localhost:3080`. The first boot creates `admin` from `DSH_AUTH_PASSWORD`. Later boots reuse `/data/auth/auth.sqlite` and ignore that password.
 
+## Pull the published image
+
+Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
+
+```text
+ghcr.io/xuhongjia/dsh-auth-docker:latest
+```
+
+After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
+
+```sh
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:latest
+# or, with the same .env as above:
+docker compose pull
+docker compose up -d
+```
+
 ## Install into an existing official dsh
 
 ```sh
