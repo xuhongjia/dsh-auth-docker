@@ -76,6 +76,17 @@ if [ "$(id -u)" = 0 ]; then
       # host owner after chown — use a+rwX so the dropped-privilege user can
       # still rewrite node_modules (private data dir on the NAS volume).
       chmod -R a+rwX "$DSH_HOME" || true
+      # credentials-local refuses to boot unless its document is owner-only,
+      # so the blanket a+rwX above must not reach it.
+      credentials="$DSH_HOME/.credentials.yaml"
+      if [ -f "$credentials" ]; then
+        chown "$PUID:$PGID" "$credentials" || true
+        chmod 600 "$credentials"
+        if ! gosu node test -r "$credentials"; then
+          echo "dsh-auth: $credentials must be mode 600 and owned by uid $PUID;" >&2
+          echo "dsh-auth: the container could not take ownership — run 'chown $PUID:$PGID' on it from the NAS host" >&2
+        fi
+      fi
     fi
     chmod 1777 "$NPM_CONFIG_CACHE" "$PNPM_STORE_DIR" "$XDG_CACHE_HOME" "$TMPDIR" || true
     export USER=node

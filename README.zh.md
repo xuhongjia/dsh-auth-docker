@@ -23,14 +23,14 @@ docker compose up --build
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.6
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.7
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.6
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.7
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d
@@ -108,3 +108,10 @@ docker compose up -d
 ```
 
 `dsh.profile.bundles` 里无法 resolve 的半残插件会在启动时被摘掉，保证 `/login` 能起来；权限修好后再用 `dsh plugin add` 重装。
+
+`credentials-local` 要求 `$DSH_HOME/.credentials.yaml` 不能被同组或其他用户读到，所以入口脚本会在放宽权限之后把它改回 `600`。该文件在主机上还必须属于 `PUID`：
+
+```sh
+chown 1000:1000 /你的/dsh数据目录/.credentials.yaml
+chmod 600 /你的/dsh数据目录/.credentials.yaml
+```

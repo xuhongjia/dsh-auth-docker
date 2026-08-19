@@ -23,14 +23,14 @@ Behind HTTPS (Caddy, nginx, Cloudflare), set `DSH_AUTH_BASE_URL` to that origin 
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.6
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.7
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.6
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.7
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -108,3 +108,10 @@ docker compose up -d
 ```
 
 Unresolvable rows in `dsh.profile.bundles` (half-installed plugins) are dropped on boot so `/login` can still come up; re-add them with `dsh plugin add` after permissions are fixed.
+
+`credentials-local` refuses to boot when `$DSH_HOME/.credentials.yaml` is group- or world-readable, so the entrypoint restores mode `600` on it after the blanket `chmod`. On the host that file must also be owned by `PUID`:
+
+```sh
+chown 1000:1000 /path/to/dsh-data/.credentials.yaml
+chmod 600 /path/to/dsh-data/.credentials.yaml
+```
