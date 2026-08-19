@@ -23,14 +23,14 @@ docker compose up --build
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.3
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.4
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.3
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.4
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d
@@ -96,3 +96,5 @@ docker compose up -d
 旧镜像以 root 运行，`/data` 下全是 uid 0。官方 DSH sandbox（bwrap / Landlock）会把 `/` 只读挂上，只允许写会话 workspace 和 `/tmp`。Agent 跑 `npm`/`pnpm` 时写不了 `/root/.npm`（日志会提示 `sudo chown -R 0:0 "/root/.npm"`），接着经常变成 `ERR_MODULE_NOT_FOUND`。
 
 用当前入口脚本重建并重启：启动时把 `/data` chown 成 `PUID:PGID`（默认 `1000:1000`），降到该用户，并把 npm/pnpm 缓存指到 `/tmp`。已有 volume 会在下次启动时修好，除非设置 `DSH_SKIP_CHOWN=1`。
+
+若日志停在 `Corepack is about to download …/pnpm-11.22.0.tgz` 和 `usermod: no changes`，说明 DSH 还没启动：Corepack 在等 TTY 上的 yes/no。用 `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` 重建容器（compose 已带），或重建镜像。

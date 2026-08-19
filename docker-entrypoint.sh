@@ -13,6 +13,8 @@ export npm_config_cache="$NPM_CONFIG_CACHE"
 export npm_config_logs_dir="${npm_config_logs_dir:-$NPM_CONFIG_CACHE/_logs}"
 export PNPM_STORE_DIR="${PNPM_STORE_DIR:-/tmp/pnpm-store}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/xdg-cache}"
+export COREPACK_HOME="${COREPACK_HOME:-/usr/local/share/corepack}"
+export COREPACK_ENABLE_DOWNLOAD_PROMPT="${COREPACK_ENABLE_DOWNLOAD_PROMPT:-0}"
 
 mkdir -p "$DSH_HOME" "$NPM_CONFIG_CACHE" "$npm_config_logs_dir" "$PNPM_STORE_DIR" "$XDG_CACHE_HOME"
 
@@ -50,8 +52,12 @@ if [ "$(id -u)" = 0 ]; then
   PUID="${PUID:-1000}"
   PGID="${PGID:-1000}"
   if [ "$PUID" != 0 ]; then
-    groupmod -o -g "$PGID" node
-    usermod -o -u "$PUID" -g "$PGID" -d /home/node node
+    if [ "$(id -g node)" != "$PGID" ]; then
+      groupmod -o -g "$PGID" node
+    fi
+    if [ "$(id -u node)" != "$PUID" ]; then
+      usermod -o -u "$PUID" -g "$PGID" -d /home/node node
+    fi
     mkdir -p /home/node
     chown "$PUID:$PGID" /home/node
     case "$DSH_HOME" in

@@ -1,10 +1,18 @@
 FROM node:22.19-bookworm-slim
 
+# Shared Corepack store so the dropped-privilege `node` user can run `pnpm`
+# without a TTY prompt. Profiles often pin pnpm@11 via packageManager.
+ENV COREPACK_HOME=/usr/local/share/corepack \
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git gosu \
   && rm -rf /var/lib/apt/lists/* \
+  && mkdir -p "$COREPACK_HOME" \
   && corepack enable \
-  && corepack prepare pnpm@10.14.0 --activate
+  && corepack prepare pnpm@10.14.0 --activate \
+  && corepack prepare pnpm@11.22.0 \
+  && chmod -R a+rwX "$COREPACK_HOME"
 
 # Official Harness, not a fork. Pin the published CLI.
 ARG DSH_VERSION=0.1.0-rc.7
@@ -35,7 +43,9 @@ ENV DSH_HOME=/data \
     npm_config_logs_dir=/tmp/npm-cache/_logs \
     npm_config_update_notifier=false \
     PNPM_STORE_DIR=/tmp/pnpm-store \
-    XDG_CACHE_HOME=/tmp/xdg-cache
+    XDG_CACHE_HOME=/tmp/xdg-cache \
+    COREPACK_HOME=/usr/local/share/corepack \
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
 VOLUME ["/data"]
 EXPOSE 3080
