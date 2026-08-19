@@ -23,14 +23,14 @@ Behind HTTPS (Caddy, nginx, Cloudflare), set `DSH_AUTH_BASE_URL` to that origin 
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.7
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.8
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.7
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.8
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -61,8 +61,8 @@ The public URL is printed as `dsh-auth: public http://0.0.0.0:3080 → 127.0.0.1
 | `DSH_AUTH_SECURE_COOKIES` | Set `1` when the public origin is HTTPS |
 | `PORT` | Public listen port, default `3080` |
 | `DSH_HOME` | Harness home (auth sqlite, sessions, settings). Docker uses `/data` |
-| `PUID` / `PGID` | Runtime uid/gid inside the container, default `1000` (`node`). Entrypoint starts as root, chowns `/data`, then drops privileges. Set these to your host user if you bind-mount a workspace |
-| `DSH_SKIP_CHOWN` | Set `1` to skip the `/data` chown on boot |
+| `PUID` / `PGID` | Runtime uid/gid inside the container, default `0` (root). Set `1000` or your host user to chown `/data` and drop privileges instead |
+| `DSH_SKIP_CHOWN` | Set `1` to skip the `/data` chown when dropping privileges |
 
 ## Layout
 
@@ -91,27 +91,16 @@ docker compose up -d
 
 Replace `dsh-auth-docker_dsh-data` with your compose volume name (`docker volume ls | grep dsh`). Current images that include this entrypoint reset an invalid overlay automatically and keep a `.bak`.
 
-## Root-owned files and `npm` EACCES under `/root/.npm`
+## Runtime user, sandbox npm cache, and credentials mode
 
-The published image used to run as root, so everything under `/data` was uid 0. Official DSH sandbox (bwrap / Landlock) then mounts `/` read-only and only allows writes to the session workspace and `/tmp`. Agent `npm`/`pnpm` therefore cannot write `/root/.npm` (logs say `sudo chown -R 0:0 "/root/.npm"`), and the follow-on failure is often `ERR_MODULE_NOT_FOUND`.
+The container runs as **root** by default (`PUID=0`). That matches a single bind-mounted `/data` directory (for example a NAS share): root can rewrite pnpm's `0444` packages, so `dsh plugin add` no longer fails with EACCES. Set `PUID`/`PGID` only when you want to drop privileges; the entrypoint then chowns `/data` and `gosu`s to that user.
 
-Rebuild/restart with this entrypoint: it chowns `/data` to `PUID:PGID` (default `1000:1000`), drops to that user, and points npm/pnpm caches at `/tmp`. Existing volumes are fixed on the next boot unless you set `DSH_SKIP_CHOWN=1`.
+Official DSH sandbox (bwrap / Landlock) mounts `/` read-only and only writes the session workspace and `/tmp`. npm/pnpm caches therefore point at `/tmp`, not `/root/.npm`. Recreate with `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` (compose already sets this) if logs stop at Corepack's Yes/No download prompt.
 
-If logs stop at `Corepack is about to download …/pnpm-11.22.0.tgz` and `usermod: no changes`, DSH never started: Corepack is waiting for a TTY yes/no. Recreate with `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` (compose already sets this) or rebuild the image.
-
-If logs show `EACCES: permission denied, open '…/node_modules/…/package.json'`, pnpm store files are mode `0444`. The entrypoint runs `chmod -R a+rwX` on `/data` (NAS bind mounts often ignore container `chown`). To unblock on the host without rebuilding:
+`credentials-local` refuses to boot when `$DSH_HOME/.credentials.yaml` is group- or world-readable. The entrypoint sets that file to mode `600` on every boot. If a host chmod made it `666`, fix it on the host as well:
 
 ```sh
-docker compose stop
-chmod -R a+rwX /path/to/dsh-data
-docker compose up -d
-```
-
-Unresolvable rows in `dsh.profile.bundles` (half-installed plugins) are dropped on boot so `/login` can still come up; re-add them with `dsh plugin add` after permissions are fixed.
-
-`credentials-local` refuses to boot when `$DSH_HOME/.credentials.yaml` is group- or world-readable, so the entrypoint restores mode `600` on it after the blanket `chmod`. On the host that file must also be owned by `PUID`:
-
-```sh
-chown 1000:1000 /path/to/dsh-data/.credentials.yaml
 chmod 600 /path/to/dsh-data/.credentials.yaml
 ```
+
+Unresolvable rows in `dsh.profile.bundles` (half-installed plugins) are dropped on boot so `/login` can still come up; re-add them with `dsh plugin add`.

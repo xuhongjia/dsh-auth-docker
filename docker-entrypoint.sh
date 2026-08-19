@@ -45,55 +45,52 @@ process.stderr.write(`dsh-auth: reset invalid overlay ${file} (backup ${file}.ba
 EOF
 }
 
-# Start as root so an existing root-owned /data volume can be reassigned, then
-# drop to PUID:PGID (default: image `node` user 1000:1000). Official sandbox
-# children inherit this uid, so workspace files are no longer created as root.
-if [ "$(id -u)" = 0 ]; then
-  PUID="${PUID:-1000}"
-  PGID="${PGID:-1000}"
-  if [ "$PUID" != 0 ]; then
-    if [ "$(id -g node)" != "$PGID" ]; then
-      groupmod -o -g "$PGID" node
-    fi
-    if [ "$(id -u node)" != "$PUID" ]; then
-      usermod -o -u "$PUID" -g "$PGID" -d /home/node node
-    fi
-    mkdir -p /home/node
-    chown "$PUID:$PGID" /home/node
-    case "$DSH_HOME" in
-      /|/usr|/opt|/etc|/root|/home|/bin|/sbin)
-        echo "dsh-auth: refusing to chown $DSH_HOME" >&2
-        exit 1
-        ;;
-    esac
-    if [ "${DSH_SKIP_CHOWN:-0}" != 1 ]; then
-      # NAS bind mounts sometimes ignore or remap ownership; never abort boot
-      # solely because chown could not rewrite every inode.
-      chown -R "$PUID:$PGID" "$DSH_HOME" || true
-    fi
-    if [ "${DSH_SKIP_CHMOD:-0}" != 1 ]; then
-      # pnpm store files are often 0444. On NAS, container uid may not match
-      # host owner after chown — use a+rwX so the dropped-privilege user can
-      # still rewrite node_modules (private data dir on the NAS volume).
-      chmod -R a+rwX "$DSH_HOME" || true
-      # credentials-local refuses to boot unless its document is owner-only,
-      # so the blanket a+rwX above must not reach it.
-      credentials="$DSH_HOME/.credentials.yaml"
-      if [ -f "$credentials" ]; then
-        chown "$PUID:$PGID" "$credentials" || true
-        chmod 600 "$credentials"
-        if ! gosu node test -r "$credentials"; then
-          echo "dsh-auth: $credentials must be mode 600 and owned by uid $PUID;" >&2
-          echo "dsh-auth: the container could not take ownership — run 'chown $PUID:$PGID' on it from the NAS host" >&2
-        fi
-      fi
-    fi
-    chmod 1777 "$NPM_CONFIG_CACHE" "$PNPM_STORE_DIR" "$XDG_CACHE_HOME" "$TMPDIR" || true
-    export USER=node
-    export HOME=/home/node
-    exec gosu node "$0" "$@"
+# credentials-local refuses to boot while its document is group- or
+# world-readable, whatever uid runs dsh. Tighten it before the plugin tree loads.
+tighten_credentials_mode() {
+  credentials="$DSH_HOME/.credentials.yaml"
+  [ -f "$credentials" ] || return 0
+  chmod 600 "$credentials" 2>/dev/null \
+    || echo "dsh-auth: cannot chmod 600 $credentials; run it on the NAS host" >&2
+}
+
+# Run as root by default: DSH owns the whole /data mount, and root writes
+# through the read-only modes pnpm stamps on its content-addressable packages.
+# Set PUID (and PGID) to drop privileges instead; the volume is then chowned to
+# that uid, which NAS bind mounts may silently remap.
+if [ "$(id -u)" = 0 ] && [ "${PUID:-0}" != 0 ]; then
+  PGID="${PGID:-$PUID}"
+  case "$DSH_HOME" in
+    /|/usr|/opt|/etc|/root|/home|/bin|/sbin)
+      echo "dsh-auth: refusing to chown $DSH_HOME" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$(id -g node)" != "$PGID" ]; then
+    groupmod -o -g "$PGID" node
   fi
+  if [ "$(id -u node)" != "$PUID" ]; then
+    usermod -o -u "$PUID" -g "$PGID" -d /home/node node
+  fi
+  mkdir -p /home/node
+  chown "$PUID:$PGID" /home/node
+  if [ "${DSH_SKIP_CHOWN:-0}" != 1 ]; then
+    # NAS bind mounts sometimes ignore or remap ownership; never abort boot
+    # solely because chown could not rewrite every inode.
+    chown -R "$PUID:$PGID" "$DSH_HOME" || true
+  fi
+  if [ "${DSH_SKIP_CHMOD:-0}" != 1 ]; then
+    # pnpm packages are often mode 0444, which only their owner may rewrite.
+    chmod -R u+w "$DSH_HOME" || true
+  fi
+  chmod 1777 "$NPM_CONFIG_CACHE" "$PNPM_STORE_DIR" "$XDG_CACHE_HOME" "$TMPDIR" || true
+  tighten_credentials_mode
+  export USER=node
+  export HOME=/home/node
+  exec gosu node "$0" "$@"
 fi
+
+tighten_credentials_mode
 
 # Official dsh is installed from npm. This image then adds the local bundle
 # into the `web` profile. Re-running on a persisted volume is idempotent.

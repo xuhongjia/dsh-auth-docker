@@ -23,14 +23,14 @@ docker compose up --build
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.7
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.8
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.7
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.8
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d
@@ -61,8 +61,8 @@ dsh --profile web
 | `DSH_AUTH_SECURE_COOKIES` | 公网 origin 为 HTTPS 时设为 `1` |
 | `PORT` | 公网监听端口，默认 `3080` |
 | `DSH_HOME` | Harness home（认证 sqlite、会话、设置）。Docker 使用 `/data` |
-| `PUID` / `PGID` | 容器内运行时 uid/gid，默认 `1000`（`node`）。入口脚本以 root 启动、chown `/data`，再降权。bind-mount 工作区时请改成宿主机用户 |
-| `DSH_SKIP_CHOWN` | 设为 `1` 则启动时不 chown `/data` |
+| `PUID` / `PGID` | 容器内运行时 uid/gid，默认 `0`（root）。想降权就设成 `1000` 或宿主机用户，此时会先 chown `/data` |
+| `DSH_SKIP_CHOWN` | 降权时设为 `1` 则不 chown `/data` |
 
 ## 目录
 
@@ -91,27 +91,16 @@ docker compose up -d
 
 把 `dsh-auth-docker_dsh-data` 换成你的 compose volume 名（`docker volume ls | grep dsh`）。包含当前 entrypoint 的镜像会自动复位非法 overlay，并留下 `.bak`。
 
-## 文件全是 root，以及 `/root/.npm` 的 npm EACCES
+## 运行用户、sandbox 的 npm 缓存，以及凭据文件权限
 
-旧镜像以 root 运行，`/data` 下全是 uid 0。官方 DSH sandbox（bwrap / Landlock）会把 `/` 只读挂上，只允许写会话 workspace 和 `/tmp`。Agent 跑 `npm`/`pnpm` 时写不了 `/root/.npm`（日志会提示 `sudo chown -R 0:0 "/root/.npm"`），接着经常变成 `ERR_MODULE_NOT_FOUND`。
+容器默认以 **root** 运行（`PUID=0`）。适合只 bind-mount 一个 `/data` 目录（例如 NAS 共享盘）：root 能改写 pnpm 打成 `0444` 的包，`dsh plugin add` 不会再因 EACCES 失败。只有需要降权时才设 `PUID`/`PGID`；此时入口脚本会 chown `/data` 再 `gosu` 到该用户。
 
-用当前入口脚本重建并重启：启动时把 `/data` chown 成 `PUID:PGID`（默认 `1000:1000`），降到该用户，并把 npm/pnpm 缓存指到 `/tmp`。已有 volume 会在下次启动时修好，除非设置 `DSH_SKIP_CHOWN=1`。
+官方 DSH sandbox（bwrap / Landlock）把 `/` 只读挂上，只允许写会话 workspace 和 `/tmp`。因此 npm/pnpm 缓存指到 `/tmp`，而不是 `/root/.npm`。若日志停在 Corepack 的 Yes/No 下载提示，用 `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` 重建（compose 已带）。
 
-若日志停在 `Corepack is about to download …/pnpm-11.22.0.tgz` 和 `usermod: no changes`，说明 DSH 还没启动：Corepack 在等 TTY 上的 yes/no。用 `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` 重建容器（compose 已带），或重建镜像。
-
-若日志出现 `EACCES: permission denied, open '…/node_modules/…/package.json'`，那是 pnpm store 文件权限为 `0444`。入口脚本会对 `/data` 执行 `chmod -R a+rwX`（极空间等 NAS bind-mount 常忽略容器内 `chown`）。不等新镜像时在主机上：
+`credentials-local` 要求 `$DSH_HOME/.credentials.yaml` 不能被同组或其他用户读到。入口脚本每次启动都会把它设成 `600`。若主机上的 chmod 把它弄成了 `666`，也在主机上修一次：
 
 ```sh
-docker compose stop
-chmod -R a+rwX /你的/dsh数据目录
-docker compose up -d
-```
-
-`dsh.profile.bundles` 里无法 resolve 的半残插件会在启动时被摘掉，保证 `/login` 能起来；权限修好后再用 `dsh plugin add` 重装。
-
-`credentials-local` 要求 `$DSH_HOME/.credentials.yaml` 不能被同组或其他用户读到，所以入口脚本会在放宽权限之后把它改回 `600`。该文件在主机上还必须属于 `PUID`：
-
-```sh
-chown 1000:1000 /你的/dsh数据目录/.credentials.yaml
 chmod 600 /你的/dsh数据目录/.credentials.yaml
 ```
+
+`dsh.profile.bundles` 里无法 resolve 的半残插件会在启动时被摘掉，保证 `/login` 能起来；再用 `dsh plugin add` 重装。
