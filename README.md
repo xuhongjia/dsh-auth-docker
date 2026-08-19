@@ -23,14 +23,14 @@ Behind HTTPS (Caddy, nginx, Cloudflare), set `DSH_AUTH_BASE_URL` to that origin 
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.5
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.6
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.5
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.6
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -99,10 +99,12 @@ Rebuild/restart with this entrypoint: it chowns `/data` to `PUID:PGID` (default 
 
 If logs stop at `Corepack is about to download …/pnpm-11.22.0.tgz` and `usermod: no changes`, DSH never started: Corepack is waiting for a TTY yes/no. Recreate with `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` (compose already sets this) or rebuild the image.
 
-If logs show `EACCES: permission denied, open '…/node_modules/…/package.json'`, pnpm store files are mode `0444`. The entrypoint runs `chmod -R u+w` on `/data` after chown. To unblock an older image without rebuilding:
+If logs show `EACCES: permission denied, open '…/node_modules/…/package.json'`, pnpm store files are mode `0444`. The entrypoint runs `chmod -R a+rwX` on `/data` (NAS bind mounts often ignore container `chown`). To unblock on the host without rebuilding:
 
 ```sh
 docker compose stop
-docker run --rm -v dsh-auth-docker_dsh-data:/data alpine chmod -R u+w /data
+chmod -R a+rwX /path/to/dsh-data
 docker compose up -d
 ```
+
+Unresolvable rows in `dsh.profile.bundles` (half-installed plugins) are dropped on boot so `/login` can still come up; re-add them with `dsh plugin add` after permissions are fixed.

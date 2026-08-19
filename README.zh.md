@@ -23,14 +23,14 @@ docker compose up --build
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.5
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.6
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.5
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.6
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d
@@ -99,10 +99,12 @@ docker compose up -d
 
 若日志停在 `Corepack is about to download …/pnpm-11.22.0.tgz` 和 `usermod: no changes`，说明 DSH 还没启动：Corepack 在等 TTY 上的 yes/no。用 `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` 重建容器（compose 已带），或重建镜像。
 
-若日志出现 `EACCES: permission denied, open '…/node_modules/…/package.json'`，那是 pnpm store 文件权限为 `0444`。入口脚本会在 chown 后对 `/data` 执行 `chmod -R u+w`。不等新镜像时可以先：
+若日志出现 `EACCES: permission denied, open '…/node_modules/…/package.json'`，那是 pnpm store 文件权限为 `0444`。入口脚本会对 `/data` 执行 `chmod -R a+rwX`（极空间等 NAS bind-mount 常忽略容器内 `chown`）。不等新镜像时在主机上：
 
 ```sh
 docker compose stop
-docker run --rm -v dsh-auth-docker_dsh-data:/data alpine chmod -R u+w /data
+chmod -R a+rwX /你的/dsh数据目录
 docker compose up -d
 ```
+
+`dsh.profile.bundles` 里无法 resolve 的半残插件会在启动时被摘掉，保证 `/login` 能起来；权限修好后再用 `dsh plugin add` 重装。

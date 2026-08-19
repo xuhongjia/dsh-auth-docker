@@ -67,12 +67,15 @@ if [ "$(id -u)" = 0 ]; then
         ;;
     esac
     if [ "${DSH_SKIP_CHOWN:-0}" != 1 ]; then
-      chown -R "$PUID:$PGID" "$DSH_HOME"
-      # pnpm content-addressable packages are often mode 0444. Root can still
-      # rewrite them; the `node` user cannot, so `dsh plugin add` fails with
-      # EACCES on paths like node_modules/*/package.json. Restore user write
-      # before dropping privileges.
-      chmod -R u+w "$DSH_HOME"
+      # NAS bind mounts sometimes ignore or remap ownership; never abort boot
+      # solely because chown could not rewrite every inode.
+      chown -R "$PUID:$PGID" "$DSH_HOME" || true
+    fi
+    if [ "${DSH_SKIP_CHMOD:-0}" != 1 ]; then
+      # pnpm store files are often 0444. On NAS, container uid may not match
+      # host owner after chown — use a+rwX so the dropped-privilege user can
+      # still rewrite node_modules (private data dir on the NAS volume).
+      chmod -R a+rwX "$DSH_HOME" || true
     fi
     chmod 1777 "$NPM_CONFIG_CACHE" "$PNPM_STORE_DIR" "$XDG_CACHE_HOME" "$TMPDIR" || true
     export USER=node
@@ -91,5 +94,47 @@ fi
 
 repair_patch_overlay "$DSH_HOME/profiles/web/cordis.patch.yml"
 repair_patch_overlay "$DSH_HOME/cordis.patch.yml"
+
+# A broken / half-installed profile bundle (EACCES during pnpm) leaves the
+# package listed in dsh.profile.bundles but unresolvable — loadProfile then
+# aborts. Drop such rows so the auth proxy can still boot; re-add via
+# `dsh plugin add` after permissions are fixed.
+prune_unresolvable_profile_bundles() {
+  PROFILE_DIR="$DSH_HOME/profiles/web" node --input-type=module <<'EOF'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
+
+const dir = process.env.PROFILE_DIR
+if (dir === undefined || dir.length === 0) process.exit(0)
+const manifestPath = join(dir, 'package.json')
+if (!existsSync(manifestPath)) process.exit(0)
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+const bundles = manifest.dsh?.profile?.bundles
+if (!Array.isArray(bundles) || bundles.length === 0) process.exit(0)
+const requireFromProfile = createRequire(join(dir, 'package.json'))
+const kept = []
+const dropped = []
+for (const name of bundles) {
+  if (typeof name !== 'string' || name.length === 0) continue
+  try {
+    requireFromProfile.resolve(`${name}/package.json`)
+    kept.push(name)
+  } catch {
+    dropped.push(name)
+  }
+}
+if (dropped.length === 0) process.exit(0)
+manifest.dsh = manifest.dsh ?? {}
+manifest.dsh.profile = manifest.dsh.profile ?? {}
+manifest.dsh.profile.bundles = kept
+writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+process.stderr.write(
+  `dsh-auth: dropped unresolvable profile bundles: ${dropped.join(', ')} (re-add with dsh plugin add)\n`,
+)
+EOF
+}
+
+prune_unresolvable_profile_bundles
 
 exec dsh --profile web "$@"
