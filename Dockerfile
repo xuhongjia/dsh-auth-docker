@@ -1,7 +1,7 @@
 FROM node:22.19-bookworm-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates git \
+  && apt-get install -y --no-install-recommends ca-certificates git gosu \
   && rm -rf /var/lib/apt/lists/* \
   && corepack enable \
   && corepack prepare pnpm@10.14.0 --activate
@@ -18,11 +18,24 @@ RUN pnpm install \
   && pnpm prune --prod --ignore-scripts
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+  && mkdir -p /home/node \
+  && chown -R node:node /home/node /opt/dsh-auth
 
+# Official sandbox (bwrap/Landlock) mounts / read-only and only writes
+# workspace + /tmp. Keep npm/pnpm caches off /root and /home/node.
 ENV DSH_HOME=/data \
     PORT=3080 \
-    DSH_AUTH_BASE_URL=http://127.0.0.1:3080
+    DSH_AUTH_BASE_URL=http://127.0.0.1:3080 \
+    HOME=/home/node \
+    USER=node \
+    TMPDIR=/tmp \
+    NPM_CONFIG_CACHE=/tmp/npm-cache \
+    npm_config_cache=/tmp/npm-cache \
+    npm_config_logs_dir=/tmp/npm-cache/_logs \
+    npm_config_update_notifier=false \
+    PNPM_STORE_DIR=/tmp/pnpm-store \
+    XDG_CACHE_HOME=/tmp/xdg-cache
 
 VOLUME ["/data"]
 EXPOSE 3080

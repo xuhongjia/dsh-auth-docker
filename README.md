@@ -23,14 +23,14 @@ Behind HTTPS (Caddy, nginx, Cloudflare), set `DSH_AUTH_BASE_URL` to that origin 
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.2
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.3
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.2
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.3
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -61,6 +61,8 @@ The public URL is printed as `dsh-auth: public http://0.0.0.0:3080 → 127.0.0.1
 | `DSH_AUTH_SECURE_COOKIES` | Set `1` when the public origin is HTTPS |
 | `PORT` | Public listen port, default `3080` |
 | `DSH_HOME` | Harness home (auth sqlite, sessions, settings). Docker uses `/data` |
+| `PUID` / `PGID` | Runtime uid/gid inside the container, default `1000` (`node`). Entrypoint starts as root, chowns `/data`, then drops privileges. Set these to your host user if you bind-mount a workspace |
+| `DSH_SKIP_CHOWN` | Set `1` to skip the `/data` chown on boot |
 
 ## Layout
 
@@ -75,3 +77,22 @@ Dockerfile     npm i -g @deepseek-ai/dsh, then dsh plugin add this package
 - **No account-settings tab yet** — the Host login page is the shipped browser surface; username/password changes can be added later as a `dsh.client` contribution.
 - **One initial account** — public sign-up is disabled; the first administrator is seeded once.
 - **Official Harness stays loopback-only** — this proxy is the network face. Do not publish the internal webserver port.
+
+## Broken `cordis.patch.yml` after plugin install
+
+Official `dsh` boots only when `$DSH_HOME/profiles/web/cordis.patch.yml` is a **YAML array** (`[]` or `- id:` entries). If an online install or agent edit writes a mapping (or empties the file), boot fails with `must be a top-level YAML array`. Auth data in `/data/auth` is unrelated — reset the overlay, not the whole volume:
+
+```sh
+docker compose stop
+docker run --rm -v dsh-auth-docker_dsh-data:/data busybox \
+  sh -c 'cp /data/profiles/web/cordis.patch.yml /data/profiles/web/cordis.patch.yml.bak 2>/dev/null; printf "[]\n" > /data/profiles/web/cordis.patch.yml'
+docker compose up -d
+```
+
+Replace `dsh-auth-docker_dsh-data` with your compose volume name (`docker volume ls | grep dsh`). Current images that include this entrypoint reset an invalid overlay automatically and keep a `.bak`.
+
+## Root-owned files and `npm` EACCES under `/root/.npm`
+
+The published image used to run as root, so everything under `/data` was uid 0. Official DSH sandbox (bwrap / Landlock) then mounts `/` read-only and only allows writes to the session workspace and `/tmp`. Agent `npm`/`pnpm` therefore cannot write `/root/.npm` (logs say `sudo chown -R 0:0 "/root/.npm"`), and the follow-on failure is often `ERR_MODULE_NOT_FOUND`.
+
+Rebuild/restart with this entrypoint: it chowns `/data` to `PUID:PGID` (default `1000:1000`), drops to that user, and points npm/pnpm caches at `/tmp`. Existing volumes are fixed on the next boot unless you set `DSH_SKIP_CHOWN=1`.
