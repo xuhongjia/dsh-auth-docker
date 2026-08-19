@@ -23,14 +23,14 @@ Behind HTTPS (Caddy, nginx, Cloudflare), set `DSH_AUTH_BASE_URL` to that origin 
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.4
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.5
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.4
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.5
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -98,3 +98,11 @@ The published image used to run as root, so everything under `/data` was uid 0. 
 Rebuild/restart with this entrypoint: it chowns `/data` to `PUID:PGID` (default `1000:1000`), drops to that user, and points npm/pnpm caches at `/tmp`. Existing volumes are fixed on the next boot unless you set `DSH_SKIP_CHOWN=1`.
 
 If logs stop at `Corepack is about to download …/pnpm-11.22.0.tgz` and `usermod: no changes`, DSH never started: Corepack is waiting for a TTY yes/no. Recreate with `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` (compose already sets this) or rebuild the image.
+
+If logs show `EACCES: permission denied, open '…/node_modules/…/package.json'`, pnpm store files are mode `0444`. The entrypoint runs `chmod -R u+w` on `/data` after chown. To unblock an older image without rebuilding:
+
+```sh
+docker compose stop
+docker run --rm -v dsh-auth-docker_dsh-data:/data alpine chmod -R u+w /data
+docker compose up -d
+```

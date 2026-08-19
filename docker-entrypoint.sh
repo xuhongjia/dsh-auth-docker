@@ -68,6 +68,11 @@ if [ "$(id -u)" = 0 ]; then
     esac
     if [ "${DSH_SKIP_CHOWN:-0}" != 1 ]; then
       chown -R "$PUID:$PGID" "$DSH_HOME"
+      # pnpm content-addressable packages are often mode 0444. Root can still
+      # rewrite them; the `node` user cannot, so `dsh plugin add` fails with
+      # EACCES on paths like node_modules/*/package.json. Restore user write
+      # before dropping privileges.
+      chmod -R u+w "$DSH_HOME"
     fi
     chmod 1777 "$NPM_CONFIG_CACHE" "$PNPM_STORE_DIR" "$XDG_CACHE_HOME" "$TMPDIR" || true
     export USER=node
@@ -78,7 +83,11 @@ fi
 
 # Official dsh is installed from npm. This image then adds the local bundle
 # into the `web` profile. Re-running on a persisted volume is idempotent.
-dsh plugin --profile web add /opt/dsh-auth
+# Do not crash-loop the public proxy if an already-installed profile tree
+# still fails to reconcile — boot dsh so /login stays up.
+if ! dsh plugin --profile web add /opt/dsh-auth; then
+  echo "dsh-auth: warning: dsh plugin add failed; starting dsh anyway" >&2
+fi
 
 repair_patch_overlay "$DSH_HOME/profiles/web/cordis.patch.yml"
 repair_patch_overlay "$DSH_HOME/cordis.patch.yml"
