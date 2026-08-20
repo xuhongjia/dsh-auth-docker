@@ -1,11 +1,11 @@
 services:
   dsh:
-    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.9}
+    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.10}
     build: .
     ports:
       - "3080:3080"
     environment:
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DSH_AUTH_PASSWORD: ${DSH_AUTH_PASSWORD}
       DSH_AUTH_SECRET: ${DSH_AUTH_SECRET}
       DSH_AUTH_BASE_URL: ${DSH_AUTH_BASE_URL:-http://localhost:3080}

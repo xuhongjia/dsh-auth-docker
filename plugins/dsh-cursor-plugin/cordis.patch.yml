@@ -1,0 +1,25 @@
+# Loopback Cursor SDK gateway. DSH llm-pi-ai calls this OpenAI-compatible
+# route; the official webserver and auth plugin are unchanged.
+# This row replaces composition config for id llm-pi-ai only. User
+# $DSH_HOME/settings.yaml still merges per provider (e.g. opencode-go stays).
+- insert:
+    - id: cursor-gateway
+      name: dsh-cursor-plugin
+      config:
+        listenHost: '127.0.0.1'
+        listenPort: 3090
+        workspace: !!js dshHomePath('cursor-gateway')
+
+- id: llm-pi-ai
+  config:
+    providers:
+      cursor:
+        displayName: Cursor
+        api: openai-completions
+        baseURL: http://127.0.0.1:3090/v1
+        apiKeyEnv: CURSOR_API_KEY
+        compat:
+          supportsDeveloperRole: false
+          maxTokensField: max_tokens
+        models:
+          - id: auto

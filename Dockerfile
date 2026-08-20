@@ -18,17 +18,17 @@ RUN apt-get update \
 ARG DSH_VERSION=0.1.0-rc.7
 RUN npm install -g "@deepseek-ai/dsh@${DSH_VERSION}"
 
-WORKDIR /opt/dsh-auth
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json cordis.patch.yml ./
-COPY src ./src
+WORKDIR /opt
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY plugins ./plugins
 RUN pnpm install \
-  && pnpm build \
+  && pnpm -r build \
   && pnpm prune --prod --ignore-scripts
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
   && mkdir -p /home/node \
-  && chown -R node:node /home/node /opt/dsh-auth
+  && chown -R node:node /home/node /opt
 
 # Official sandbox (bwrap/Landlock) mounts / read-only and only writes
 # workspace + /tmp. Keep npm/pnpm caches off /root and /home/node.

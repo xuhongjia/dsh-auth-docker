@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-为官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 Better Auth 登录。本仓库 **不是 fork**。Docker 从 npm 安装 `@deepseek-ai/dsh`，再用 `dsh plugin --profile web add` 装入本 bundle。
+为官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 Better Auth 登录。本仓库 **不是 fork**。Docker 从 npm 安装 `@deepseek-ai/dsh`，再对 `plugins/` 下每个 bundle 执行 `dsh plugin --profile web add`。
 
 官方 Web 服务拒绝 `--host 0.0.0.0`，也没有认证 middleware。本插件监听 `0.0.0.0:3080`，提供 `/login` 与 `/auth`，并把已登录的 HTTP 和 WebSocket 反代到 `127.0.0.1` 上的官方 webserver。账号密码不会进入 DSH 的模型 RPC。
 
@@ -10,7 +10,7 @@
 
 ```sh
 cp .env.example .env
-# 填写 DEEPSEEK_API_KEY、DSH_AUTH_PASSWORD、DSH_AUTH_SECRET（至少 32 个字符）
+# 填写 DSH_AUTH_PASSWORD、DSH_AUTH_SECRET（至少 32 个字符）；DEEPSEEK_API_KEY 可选
 docker compose up --build
 ```
 
@@ -23,14 +23,14 @@ docker compose up --build
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.9
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.10
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.9
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.10
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d
@@ -43,7 +43,8 @@ npm install -g @deepseek-ai/dsh
 pnpm install && pnpm build
 export DSH_AUTH_PASSWORD='...'
 export DSH_AUTH_SECRET='...'   # 至少 32 个字符
-dsh plugin --profile web add .
+dsh plugin --profile web add ./plugins/dsh-auth
+dsh plugin --profile web add ./plugins/dsh-cursor-plugin
 dsh --profile web
 ```
 
@@ -53,7 +54,7 @@ dsh --profile web
 
 | 变量 | 含义 |
 |---|---|
-| `DEEPSEEK_API_KEY` | 官方 Harness 模型密钥 |
+| `DEEPSEEK_API_KEY` | 可选的官方 DeepSeek Models 密钥。也可在 Settings → Models 配置 Cursor |
 | `DSH_AUTH_PASSWORD` | 初始管理员密码；仅在认证数据库没有用户时读取 |
 | `DSH_AUTH_SECRET` | Better Auth 签名密钥，至少 32 个字符 |
 | `DSH_AUTH_BASE_URL` | 公网 origin，例如 `http://localhost:3080` 或 `https://dsh.example.com` |
@@ -67,10 +68,12 @@ dsh --profile web
 ## 目录
 
 ```
-src/           Cordis bundle：Better Auth + 反向代理
-cordis.patch.yml   把官方 webserver 绑到 127.0.0.1:0，并插入本插件
-Dockerfile     npm i -g @deepseek-ai/dsh，然后 dsh plugin add 本包
+plugins/dsh-auth           Cordis bundle：Better Auth + 反向代理
+plugins/dsh-cursor-plugin  Cursor SDK 的 loopback OpenAI 网关（Settings → Models）
+Dockerfile                 npm i -g @deepseek-ai/dsh，然后对 plugins/* 逐个 dsh plugin add
 ```
+
+见 [plugins/README.md](plugins/README.md) 与 [plugins/dsh-cursor-plugin/README.md](plugins/dsh-cursor-plugin/README.md)。已有 `$DSH_HOME/settings.yaml` 里的 `llm-pi-ai.providers`（例如 `opencode-go`）会和 Cursor 路由按 provider 名合并。
 
 ## 已知限制
 

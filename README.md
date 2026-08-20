@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Better Auth login for official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). This repository is **not a fork**. Docker installs `@deepseek-ai/dsh` from npm, then `dsh plugin --profile web add` this bundle.
+Better Auth login for official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). This repository is **not a fork**. Docker installs `@deepseek-ai/dsh` from npm, then `dsh plugin --profile web add` every bundle under `plugins/`.
 
 The official Web server rejects `--host 0.0.0.0` and has no auth middleware. This plugin binds `0.0.0.0:3080`, serves `/login` and `/auth`, and proxies authenticated HTTP plus WebSocket traffic to the official webserver on `127.0.0.1`. Account passwords never enter DSH model RPC.
 
@@ -10,7 +10,7 @@ The official Web server rejects `--host 0.0.0.0` and has no auth middleware. Thi
 
 ```sh
 cp .env.example .env
-# set DEEPSEEK_API_KEY, DSH_AUTH_PASSWORD, DSH_AUTH_SECRET (>= 32 chars)
+# set DSH_AUTH_PASSWORD, DSH_AUTH_SECRET (>= 32 chars); DEEPSEEK_API_KEY is optional
 docker compose up --build
 ```
 
@@ -23,14 +23,14 @@ Behind HTTPS (Caddy, nginx, Cloudflare), set `DSH_AUTH_BASE_URL` to that origin 
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.9
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.10
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.9
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.10
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -43,7 +43,8 @@ npm install -g @deepseek-ai/dsh
 pnpm install && pnpm build
 export DSH_AUTH_PASSWORD='...'
 export DSH_AUTH_SECRET='...'   # >= 32 characters
-dsh plugin --profile web add .
+dsh plugin --profile web add ./plugins/dsh-auth
+dsh plugin --profile web add ./plugins/dsh-cursor-plugin
 dsh --profile web
 ```
 
@@ -53,7 +54,7 @@ The public URL is printed as `dsh-auth: public http://0.0.0.0:3080 → 127.0.0.1
 
 | Variable | Meaning |
 |---|---|
-| `DEEPSEEK_API_KEY` | Official Harness model key |
+| `DEEPSEEK_API_KEY` | Optional official DeepSeek Models key. Cursor can be configured in Settings → Models instead |
 | `DSH_AUTH_PASSWORD` | Initial admin password; read only when the auth database has no users |
 | `DSH_AUTH_SECRET` | Better Auth signing secret, at least 32 characters |
 | `DSH_AUTH_BASE_URL` | Public origin, for example `http://localhost:3080` or `https://dsh.example.com` |
@@ -67,10 +68,12 @@ The public URL is printed as `dsh-auth: public http://0.0.0.0:3080 → 127.0.0.1
 ## Layout
 
 ```
-src/           Cordis bundle: Better Auth + reverse proxy
-cordis.patch.yml   Forces official webserver onto 127.0.0.1:0 and inserts this plugin
-Dockerfile     npm i -g @deepseek-ai/dsh, then dsh plugin add this package
+plugins/dsh-auth           Cordis bundle: Better Auth + reverse proxy
+plugins/dsh-cursor-plugin  Loopback Cursor SDK OpenAI gateway (Settings → Models)
+Dockerfile                 npm i -g @deepseek-ai/dsh, then dsh plugin add each plugins/* folder
 ```
+
+See [plugins/README.md](plugins/README.md) and [plugins/dsh-cursor-plugin/README.md](plugins/dsh-cursor-plugin/README.md). Existing `$DSH_HOME/settings.yaml` `llm-pi-ai.providers` (for example `opencode-go`) merge per provider with the Cursor route.
 
 ## Known limitations
 
