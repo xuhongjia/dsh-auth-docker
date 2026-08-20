@@ -38,6 +38,39 @@ export function upstreamHeaders(headers: IncomingHttpHeaders, upstreamHost: stri
   return forwarded
 }
 
+const PAIRED_HEARTBEAT_BODY = Buffer.from(JSON.stringify({ ok: true }))
+
+/**
+ * True when upstream is the marketplace pairing plugin refusing an unpaired
+ * `POST /api/pair/heartbeat`. A Better Auth session already passed the public
+ * gate; rewrite that 401 to `{ok:true}` so the public-origin desktop stops
+ * polling unpaired. A live pairing cookie's 200 is not this body.
+ * @param status - upstream status code.
+ * @param body - upstream response bytes.
+ * @returns whether the gateway should replace the body with `{ok:true}`.
+ */
+export function isUnpairedHeartbeatResponse(status: number, body: Buffer): boolean {
+  if (status !== 401) return false
+  try {
+    const parsed: unknown = JSON.parse(body.toString('utf8'))
+    if (parsed === null || typeof parsed !== 'object') return false
+    if (!('ok' in parsed) || !('code' in parsed)) return false
+    return parsed.ok === false && parsed.code === 'unpaired'
+  } catch {
+    // JSON.parse threw on a non-JSON body; keep the upstream response.
+    return false
+  }
+}
+
+function writeUpstreamUnavailable(res: ServerResponse): void {
+  if (res.headersSent) {
+    res.destroy()
+    return
+  }
+  res.writeHead(502, { 'cache-control': 'no-store', 'content-type': 'text/plain; charset=utf-8' })
+  res.end('upstream unavailable')
+}
+
 /**
  * Proxy one HTTP request to the official loopback webserver.
  * @param req - public request.
@@ -56,14 +89,50 @@ export function proxyHttp(req: IncomingMessage, res: ServerResponse, port: numbe
     res.writeHead(upRes.statusCode ?? 502, upRes.headers)
     upRes.pipe(res)
   })
-  upstream.on('error', () => {
-    if (res.headersSent) {
-      res.destroy()
-      return
-    }
-    res.writeHead(502, { 'cache-control': 'no-store', 'content-type': 'text/plain; charset=utf-8' })
-    res.end('upstream unavailable')
+  upstream.on('error', () => { writeUpstreamUnavailable(res) })
+  req.pipe(upstream)
+}
+
+/**
+ * Proxy `POST /api/pair/heartbeat`. Forward a live pairing cookie unchanged;
+ * replace the plugin's unpaired 401 with `{ok:true}` for a logged-in session.
+ * @param req - public request.
+ * @param res - public response.
+ * @param port - official webserver port.
+ */
+export function proxyPairHeartbeat(req: IncomingMessage, res: ServerResponse, port: number): void {
+  const upstreamHost = `127.0.0.1:${String(port)}`
+  const upstream = requestHttp({
+    hostname: '127.0.0.1',
+    port,
+    path: req.url,
+    method: req.method,
+    headers: upstreamHeaders(req.headers, upstreamHost),
+  }, (upRes) => {
+    const chunks: Buffer[] = []
+    upRes.on('data', (chunk: Buffer | string) => {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+    })
+    upRes.on('end', () => {
+      const body = Buffer.concat(chunks)
+      const status = upRes.statusCode ?? 502
+      if (isUnpairedHeartbeatResponse(status, body)) {
+        res.writeHead(200, {
+          'cache-control': 'no-store',
+          'content-type': 'application/json; charset=utf-8',
+        })
+        res.end(PAIRED_HEARTBEAT_BODY)
+        return
+      }
+      const headers: IncomingHttpHeaders = { ...upRes.headers }
+      delete headers['transfer-encoding']
+      headers['content-length'] = String(body.length)
+      res.writeHead(status, headers)
+      res.end(body)
+    })
+    upRes.on('error', () => { writeUpstreamUnavailable(res) })
   })
+  upstream.on('error', () => { writeUpstreamUnavailable(res) })
   req.pipe(upstream)
 }
 

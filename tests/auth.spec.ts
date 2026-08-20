@@ -1,4 +1,4 @@
-import { createServer } from 'node:http'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,6 +10,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { createAuth, ensureDatabaseFile, migrateAuth, seedInitialUser } from '../src/auth.ts'
 import { resolveAuthConfig, safeRedirect } from '../src/config.ts'
 import { listenAuthGateway } from '../src/gateway.ts'
+import { isUnpairedHeartbeatResponse } from '../src/proxy.ts'
 
 const SECRET = 'dsh-auth-test-secret-value-32chars!'
 const PASSWORD = 'correct-horse-battery-staple'
@@ -44,7 +45,11 @@ function setEnv(key: string, value: string): void {
   process.env[key] = value
 }
 
-async function boot(options?: { password?: string; existingDb?: string }): Promise<{ port: number; upstreamPort: number }> {
+async function boot(options?: {
+  password?: string
+  existingDb?: string
+  onUpstream?: (req: IncomingMessage, res: ServerResponse) => boolean
+}): Promise<{ port: number; upstreamPort: number }> {
   setEnv('DSH_AUTH_SECRET', SECRET)
   if (options?.password !== undefined) setEnv('DSH_AUTH_PASSWORD', options.password)
   else setEnv('DSH_AUTH_PASSWORD', PASSWORD)
@@ -65,6 +70,7 @@ async function boot(options?: { password?: string; existingDb?: string }): Promi
   let captured = ''
   upstream = createServer((req, res) => {
     captured = `${req.method ?? ''} ${req.url ?? ''} host=${String(req.headers.host)} origin=${String(req.headers.origin)}`
+    if (options?.onUpstream?.(req, res) === true) return
     res.writeHead(200, { 'content-type': 'text/plain' })
     res.end(captured)
   })
@@ -72,6 +78,19 @@ async function boot(options?: { password?: string; existingDb?: string }): Promi
   const upstreamPort = (upstream.address() as AddressInfo).port
   gateway = await listenAuthGateway({ ...config, baseURL: `http://127.0.0.1` }, auth, upstreamPort)
   return { port: gateway.port, upstreamPort }
+}
+
+async function signInCookie(port: number): Promise<string> {
+  const origin = 'http://127.0.0.1'
+  const login = await fetch(`http://127.0.0.1:${String(port)}/auth/sign-in/username`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin },
+    body: JSON.stringify({ username: 'admin', password: PASSWORD, callbackURL: '/' }),
+  })
+  expect(login.ok).toBe(true)
+  const cookie = login.headers.getSetCookie().join('; ')
+  expect(cookie.length).toBeGreaterThan(0)
+  return cookie
 }
 
 describe('dsh-auth reverse proxy', () => {
@@ -159,6 +178,65 @@ describe('dsh-auth reverse proxy', () => {
       body: JSON.stringify({ username: 'admin', password: PASSWORD }),
     })
     expect(login.ok).toBe(true)
+  })
+
+  it('classifies only the marketplace unpaired heartbeat body', () => {
+    const unpaired = Buffer.from(JSON.stringify({ ok: false, code: 'unpaired' }))
+    expect(isUnpairedHeartbeatResponse(401, unpaired)).toBe(true)
+    expect(isUnpairedHeartbeatResponse(403, unpaired)).toBe(false)
+    expect(isUnpairedHeartbeatResponse(401, Buffer.from(JSON.stringify({ ok: false, code: 'forbidden' })))).toBe(false)
+    expect(isUnpairedHeartbeatResponse(401, Buffer.from('not-json'))).toBe(false)
+    expect(isUnpairedHeartbeatResponse(200, Buffer.from(JSON.stringify({ ok: true })))).toBe(false)
+  })
+
+  it('rewrites unpaired pairing heartbeats for a signed-in session', { timeout: 20_000 }, async () => {
+    let mode: 'unpaired' | 'live' | 'forbidden' = 'unpaired'
+    const { port } = await boot({
+      onUpstream: (req, res) => {
+        if (req.url !== '/api/pair/heartbeat') return false
+        if (mode === 'unpaired') {
+          res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ ok: false, code: 'unpaired' }))
+          return true
+        }
+        if (mode === 'live') {
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ ok: true, device: 'phone' }))
+          return true
+        }
+        res.writeHead(403, { 'content-type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ ok: false, code: 'forbidden' }))
+        return true
+      },
+    })
+
+    const anonymous = await fetch(`http://127.0.0.1:${String(port)}/api/pair/heartbeat`, { method: 'POST' })
+    expect(anonymous.status).toBe(401)
+    expect(await anonymous.json()).toEqual({ error: 'unauthorized' })
+
+    const cookie = await signInCookie(port)
+    const rewritten = await fetch(`http://127.0.0.1:${String(port)}/api/pair/heartbeat`, {
+      method: 'POST',
+      headers: { cookie },
+    })
+    expect(rewritten.status).toBe(200)
+    expect(await rewritten.json()).toEqual({ ok: true })
+
+    mode = 'live'
+    const live = await fetch(`http://127.0.0.1:${String(port)}/api/pair/heartbeat`, {
+      method: 'POST',
+      headers: { cookie },
+    })
+    expect(live.status).toBe(200)
+    expect(await live.json()).toEqual({ ok: true, device: 'phone' })
+
+    mode = 'forbidden'
+    const forbidden = await fetch(`http://127.0.0.1:${String(port)}/api/pair/heartbeat`, {
+      method: 'POST',
+      headers: { cookie },
+    })
+    expect(forbidden.status).toBe(403)
+    expect(await forbidden.json()).toEqual({ ok: false, code: 'forbidden' })
   })
 
   it('rejects unauthenticated upgrades', { timeout: 20_000 }, async () => {

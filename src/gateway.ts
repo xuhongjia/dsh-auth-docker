@@ -6,7 +6,7 @@ import type { AuthInstance } from './auth.ts'
 import type { ResolvedAuthConfig } from './config.ts'
 import { safeRedirect } from './config.ts'
 import { LOGIN_CSP, loginPage } from './login-page.ts'
-import { proxyHttp, proxyUpgrade, rejectUpgrade } from './proxy.ts'
+import { proxyHttp, proxyPairHeartbeat, proxyUpgrade, rejectUpgrade } from './proxy.ts'
 
 /** Public reverse-proxy handle that sits in front of official DSH. */
 export interface AuthGateway {
@@ -134,6 +134,10 @@ async function handleRequest(
     return
   }
   if (await hasSession(auth, req)) {
+    if (path === '/api/pair/heartbeat' && req.method === 'POST') {
+      proxyPairHeartbeat(req, res, upstreamPort)
+      return
+    }
     proxyHttp(req, res, upstreamPort)
     return
   }

@@ -23,14 +23,14 @@ Behind HTTPS (Caddy, nginx, Cloudflare), set `DSH_AUTH_BASE_URL` to that origin 
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.8
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.9
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.8
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.9
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -77,6 +77,7 @@ Dockerfile     npm i -g @deepseek-ai/dsh, then dsh plugin add this package
 - **No account-settings tab yet** — the Host login page is the shipped browser surface; username/password changes can be added later as a `dsh.client` contribution.
 - **One initial account** — public sign-up is disabled; the first administrator is seeded once.
 - **Official Harness stays loopback-only** — this proxy is the network face. Do not publish the internal webserver port.
+- **Public-origin pairing heartbeat** — marketplace `dsh-remote-web-ui` treats `https://…` as LAN and `POST /api/pair/heartbeat` 401s `unpaired` when the browser has no `dsh_pair` cookie. A signed-in Better Auth session rewrites that unpaired body to `{"ok":true}`. A live pairing cookie still reaches upstream so phone/desktop presence stays accurate. QR pairing is unchanged.
 
 ## Broken `cordis.patch.yml` after plugin install
 
