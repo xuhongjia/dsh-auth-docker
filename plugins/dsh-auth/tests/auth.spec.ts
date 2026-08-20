@@ -5,12 +5,13 @@ import { join } from 'node:path'
 import { once } from 'node:events'
 import { connect } from 'node:net'
 import type { AddressInfo } from 'node:net'
+import type { Duplex } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { createAuth, ensureDatabaseFile, migrateAuth, seedInitialUser } from '../src/auth.ts'
 import { resolveAuthConfig, safeRedirect } from '../src/config.ts'
 import { listenAuthGateway } from '../src/gateway.ts'
-import { isUnpairedHeartbeatResponse } from '../src/proxy.ts'
+import { isUnpairedHeartbeatResponse, loopbackOrigin, upstreamHeaders } from '../src/proxy.ts'
 
 const SECRET = 'dsh-auth-test-secret-value-32chars!'
 const PASSWORD = 'correct-horse-battery-staple'
@@ -49,6 +50,7 @@ async function boot(options?: {
   password?: string
   existingDb?: string
   onUpstream?: (req: IncomingMessage, res: ServerResponse) => boolean
+  onUpgrade?: (req: IncomingMessage, socket: Duplex) => void
 }): Promise<{ port: number; upstreamPort: number }> {
   setEnv('DSH_AUTH_SECRET', SECRET)
   if (options?.password !== undefined) setEnv('DSH_AUTH_PASSWORD', options.password)
@@ -69,11 +71,24 @@ async function boot(options?: {
 
   let captured = ''
   upstream = createServer((req, res) => {
-    captured = `${req.method ?? ''} ${req.url ?? ''} host=${String(req.headers.host)} origin=${String(req.headers.origin)}`
+    captured = [
+      `${req.method ?? ''} ${req.url ?? ''}`,
+      `host=${String(req.headers.host)}`,
+      `origin=${String(req.headers.origin)}`,
+      `xff=${String(req.headers['x-forwarded-for'])}`,
+      `xri=${String(req.headers['x-real-ip'])}`,
+      `fwd=${String(req.headers.forwarded)}`,
+      `sfs=${String(req.headers['sec-fetch-site'])}`,
+    ].join(' ')
     if (options?.onUpstream?.(req, res) === true) return
     res.writeHead(200, { 'content-type': 'text/plain' })
     res.end(captured)
   })
+  if (options?.onUpgrade !== undefined) {
+    upstream.on('upgrade', (req, socket) => {
+      options.onUpgrade!(req, socket)
+    })
+  }
   await new Promise<void>((resolve) => { upstream!.listen(0, '127.0.0.1', () => { resolve() }) })
   const upstreamPort = (upstream.address() as AddressInfo).port
   gateway = await listenAuthGateway({ ...config, baseURL: `http://127.0.0.1` }, auth, upstreamPort)
@@ -142,8 +157,46 @@ describe('dsh-auth reverse proxy', () => {
     db.close()
   })
 
+  it('rewrites Host and Origin onto the loopback authority', () => {
+    const headers = upstreamHeaders({
+      host: 'dsh.example.com',
+      origin: 'https://dsh.example.com',
+      referer: 'https://dsh.example.com/settings',
+      'sec-fetch-site': 'same-origin',
+      'x-forwarded-for': '203.0.113.10',
+      'x-real-ip': '203.0.113.10',
+      forwarded: 'for=203.0.113.10',
+      cookie: 'session=1',
+    }, '127.0.0.1:43123')
+    expect(headers.host).toBe('127.0.0.1:43123')
+    expect(headers.origin).toBe(loopbackOrigin('127.0.0.1:43123'))
+    expect(headers.cookie).toBe('session=1')
+    expect(headers.referer).toBeUndefined()
+    expect(headers['sec-fetch-site']).toBeUndefined()
+    expect(headers['x-forwarded-for']).toBeUndefined()
+    expect(headers['x-real-ip']).toBeUndefined()
+    expect(headers.forwarded).toBeUndefined()
+  })
+
+  it('keeps Connection and Upgrade on WebSocket hops and still rewrites Origin', () => {
+    const headers = upstreamHeaders({
+      host: 'dsh.example.com',
+      origin: 'https://evil.example',
+      connection: 'Upgrade',
+      upgrade: 'websocket',
+      'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      'x-forwarded-for': '203.0.113.10',
+    }, '127.0.0.1:43123', 'upgrade')
+    expect(headers.host).toBe('127.0.0.1:43123')
+    expect(headers.origin).toBe('http://127.0.0.1:43123')
+    expect(headers.connection).toBe('Upgrade')
+    expect(headers.upgrade).toBe('websocket')
+    expect(headers['sec-websocket-key']).toBe('dGhlIHNhbXBsZSBub25jZQ==')
+    expect(headers['x-forwarded-for']).toBeUndefined()
+  })
+
   it('signs in through Better Auth and then proxies to loopback Harness', { timeout: 20_000 }, async () => {
-    const { port } = await boot()
+    const { port, upstreamPort } = await boot()
     const origin = 'http://127.0.0.1'
     const login = await fetch(`http://127.0.0.1:${String(port)}/auth/sign-in/username`, {
       method: 'POST',
@@ -155,13 +208,26 @@ describe('dsh-auth reverse proxy', () => {
     expect(cookie.length).toBeGreaterThan(0)
 
     const proxied = await fetch(`http://127.0.0.1:${String(port)}/workspace`, {
-      headers: { cookie, origin: 'http://evil.example' },
+      headers: {
+        cookie,
+        origin: 'https://evil.example',
+        referer: 'https://evil.example/settings',
+        'sec-fetch-site': 'cross-site',
+        'x-forwarded-for': '203.0.113.10',
+        'x-real-ip': '203.0.113.10',
+        forwarded: 'for=203.0.113.10',
+      },
     })
     expect(proxied.status).toBe(200)
     const body = await proxied.text()
+    const loopback = loopbackOrigin(`127.0.0.1:${String(upstreamPort)}`)
     expect(body).toContain('GET /workspace')
-    expect(body).toContain('host=127.0.0.1:')
-    expect(body).toContain('origin=undefined')
+    expect(body).toContain(`host=127.0.0.1:${String(upstreamPort)}`)
+    expect(body).toContain(`origin=${loopback}`)
+    expect(body).toContain('xff=undefined')
+    expect(body).toContain('xri=undefined')
+    expect(body).toContain('fwd=undefined')
+    expect(body).toContain('sfs=undefined')
   })
 
   it('does not overwrite an existing user on later boots', { timeout: 20_000 }, async () => {
@@ -255,5 +321,41 @@ describe('dsh-auth reverse proxy', () => {
     const [data] = await response as [Buffer]
     socket.destroy()
     expect(String(data)).toContain('401 Unauthorized')
+  })
+
+  it('rewrites Origin on authenticated upgrades and drops forwarding headers', { timeout: 20_000 }, async () => {
+    let captured = ''
+    const { port, upstreamPort } = await boot({
+      onUpgrade: (req, socket) => {
+        captured = [
+          `host=${String(req.headers.host)}`,
+          `origin=${String(req.headers.origin)}`,
+          `xff=${String(req.headers['x-forwarded-for'])}`,
+          `upgrade=${String(req.headers.upgrade)}`,
+        ].join(' ')
+        socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
+      },
+    })
+    const cookie = await signInCookie(port)
+    const socket = connect(port, '127.0.0.1')
+    await once(socket, 'connect')
+    const response = once(socket, 'data')
+    socket.write([
+      'GET /events HTTP/1.1',
+      `Host: dsh.example.com`,
+      'Origin: https://dsh.example.com',
+      'Connection: Upgrade',
+      'Upgrade: websocket',
+      `Cookie: ${cookie}`,
+      'X-Forwarded-For: 203.0.113.10',
+      '',
+      '',
+    ].join('\r\n'))
+    await response
+    socket.destroy()
+    expect(captured).toContain(`host=127.0.0.1:${String(upstreamPort)}`)
+    expect(captured).toContain(`origin=http://127.0.0.1:${String(upstreamPort)}`)
+    expect(captured).toContain('xff=undefined')
+    expect(captured).toContain('upgrade=websocket')
   })
 })

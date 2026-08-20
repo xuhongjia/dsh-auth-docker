@@ -3,8 +3,8 @@ import { connect } from 'node:net'
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
 
-/** Headers that must not be copied onto the loopback Harness request. */
-const STRIP_HEADERS = new Set([
+/** Hop-by-hop headers Node must not copy onto the next HTTP hop. */
+const HOP_BY_HOP = new Set([
   'connection',
   'keep-alive',
   'proxy-authenticate',
@@ -13,29 +13,86 @@ const STRIP_HEADERS = new Set([
   'trailers',
   'transfer-encoding',
   'upgrade',
-  'host',
-  'origin',
-  'referer',
-  'sec-fetch-site',
-  'sec-fetch-mode',
-  'sec-fetch-dest',
-  'sec-fetch-user',
 ])
 
 /**
- * Copy inbound headers onto the loopback Harness request, replacing Host and
- * dropping browser-trust markers so official DSH sees a same-host loopback call.
+ * Browser-trust and forwarding traces that must not reach loopback Harness.
+ * Plugin Market restart refuses any `Forwarded` / `X-Forwarded-For` / `X-Real-IP`.
+ */
+const TRUST_STRIP = new Set([
+  'host',
+  'origin',
+  'referer',
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-forwarded-port',
+  'x-forwarded-prefix',
+  'x-forwarded-ssl',
+  'x-forwarded-scheme',
+  'x-forwarded-server',
+  'x-original-forwarded-for',
+  'x-real-ip',
+  'x-client-ip',
+  'true-client-ip',
+  'cf-connecting-ip',
+  'cf-visitor',
+  'via',
+])
+
+export type UpstreamHeaderMode = 'http' | 'upgrade'
+
+/**
+ * Loopback origin whose host matches the rewritten Host header.
+ * Plugin Market `sameOrigin` requires Origin to be present and equal Host.
+ * @param upstreamHost - `127.0.0.1:<port>` authority of the official webserver.
+ */
+export function loopbackOrigin(upstreamHost: string): string {
+  return `http://${upstreamHost}`
+}
+
+function shouldStripHeader(name: string, mode: UpstreamHeaderMode): boolean {
+  const key = name.toLowerCase()
+  if (TRUST_STRIP.has(key) || key.startsWith('sec-fetch-')) return true
+  if (!HOP_BY_HOP.has(key)) return false
+  if (mode === 'upgrade' && (key === 'connection' || key === 'upgrade')) return false
+  return true
+}
+
+/**
+ * Copy inbound headers onto the loopback Harness request: Host and Origin become
+ * the official webserver authority so mutating plugin routes see same-origin
+ * loopback, and forwarding traces are dropped so restart guards pass.
  * @param headers - headers from the public request.
  * @param upstreamHost - `127.0.0.1:<port>` authority of the official webserver.
+ * @param mode - HTTP proxy vs WebSocket upgrade (keeps Connection/Upgrade).
  * @returns headers safe to send to loopback Harness.
  */
-export function upstreamHeaders(headers: IncomingHttpHeaders, upstreamHost: string): IncomingHttpHeaders {
-  const forwarded: IncomingHttpHeaders = { host: upstreamHost }
+export function upstreamHeaders(
+  headers: IncomingHttpHeaders,
+  upstreamHost: string,
+  mode: UpstreamHeaderMode = 'http',
+): IncomingHttpHeaders {
+  const forwarded: IncomingHttpHeaders = {
+    host: upstreamHost,
+    origin: loopbackOrigin(upstreamHost),
+  }
   for (const [name, value] of Object.entries(headers)) {
-    if (value === undefined || STRIP_HEADERS.has(name.toLowerCase())) continue
+    if (value === undefined || shouldStripHeader(name, mode)) continue
     forwarded[name] = value
   }
   return forwarded
+}
+
+function headerLines(headers: IncomingHttpHeaders): string[] {
+  const lines: string[] = []
+  for (const [name, value] of Object.entries(headers)) {
+    if (value === undefined) continue
+    const rendered = Array.isArray(value) ? value.join(', ') : value
+    lines.push(`${name}: ${rendered}`)
+  }
+  return lines
 }
 
 const PAIRED_HEARTBEAT_BODY = Buffer.from(JSON.stringify({ ok: true }))
@@ -151,16 +208,10 @@ export function proxyUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer,
   upstream.once('connect', () => {
     const lines = [
       `${req.method ?? 'GET'} ${req.url ?? '/'} HTTP/1.1`,
-      `Host: ${upstreamHost}`,
+      ...headerLines(upstreamHeaders(req.headers, upstreamHost, 'upgrade')),
+      '',
+      '',
     ]
-    for (const [name, value] of Object.entries(req.headers)) {
-      if (value === undefined || name.toLowerCase() === 'host' || name.toLowerCase() === 'origin' || name.toLowerCase().startsWith('sec-fetch-') || name.toLowerCase() === 'referer') {
-        continue
-      }
-      const rendered = Array.isArray(value) ? value.join(', ') : value
-      lines.push(`${name}: ${rendered}`)
-    }
-    lines.push('', '')
     upstream.write(lines.join('\r\n'))
     if (head.length > 0) upstream.write(head)
     socket.pipe(upstream)

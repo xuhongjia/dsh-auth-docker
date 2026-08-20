@@ -23,14 +23,14 @@ docker compose up --build
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.10
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.11
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.10
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.11
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d
@@ -81,6 +81,7 @@ Dockerfile                 npm i -g @deepseek-ai/dsh，然后对 plugins/* 逐�
 - **只有一个初始账号** —— 公开注册关闭；第一个管理员只种子一次。
 - **官方 Harness 仍只监听 loopback** —— 本代理才是网络入口。不要暴露内部 webserver 端口。
 - **公网来源的配对心跳** —— 市场插件 `dsh-remote-web-ui` 把 `https://…` 当成局域网；浏览器没有 `dsh_pair` cookie 时，`POST /api/pair/heartbeat` 会 401 `unpaired`。已登录的 Better Auth 会话会把这条 unpaired 响应改写成 `{"ok":true}`。真正带配对 cookie 的请求仍打到上游，手机/远程桌面在线状态不受影响。扫码配对流程不变。
+- **插件同源 loopback** —— 登录后代理会把 `Host` 和 `Origin` 改写成 `http://127.0.0.1:<内部端口>`，并去掉转发头（`X-Forwarded-For`、`Forwarded`、`X-Real-IP` 等）。Plugin Market 的更新/重启，以及其它要求 Origin 必须等于 Host 的插件，就会看成是本机同源请求。Better Auth 仍是公网门禁。在 Docker 里，Market 重启成功后仍会替换当前 `dsh` 进程；如果它是 PID 1，容器会退出。
 
 ## 在线装插件后 `cordis.patch.yml` 损坏
 
