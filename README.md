@@ -23,14 +23,14 @@ Behind HTTPS (Caddy, nginx, Cloudflare), set `DSH_AUTH_BASE_URL` to that origin 
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.11
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.12
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.11
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.12
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d

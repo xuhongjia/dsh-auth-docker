@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { DEFAULT_MODEL } from './sdk-backend.ts'
+import { withReasoningEffort } from './model-selection.ts'
 import { buildToolLoopPrompt, serializeMessages } from './prompt.ts'
 import { parseToolCallBlock } from './tool-calls.ts'
 import type {
@@ -95,14 +96,30 @@ async function handleChatCompletions(
 ): Promise<void> {
   const messages = Array.isArray(body.messages) ? body.messages : []
   const tools = functionTools(body.tools)
-  const model = typeof body.model === 'string' && body.model.length > 0 ? body.model : DEFAULT_MODEL
+  const requested = typeof body.model === 'string' && body.model.length > 0 ? body.model : DEFAULT_MODEL
+  const model = withReasoningEffort(requested, body.reasoning_effort)
   const prompt = tools.length > 0 && !toolChoiceNone(body.tool_choice)
     ? buildToolLoopPrompt(messages, tools)
     : serializeMessages(messages)
+  const id = `chatcmpl-dsh-cursor-${String(Date.now())}`
+  const streamText = body.stream === true && tools.length === 0
+  if (streamText) {
+    res.writeHead(200, {
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+      'content-type': 'text/event-stream; charset=utf-8',
+    })
+    await config.backend.complete(apiKey, model, prompt, (text) => {
+      res.write(`data: ${JSON.stringify(chunk(id, model, { content: text }, null))}\n\n`)
+    })
+    res.write(`data: ${JSON.stringify(chunk(id, model, {}, 'stop'))}\n\n`)
+    res.write('data: [DONE]\n\n')
+    res.end()
+    return
+  }
   const raw = await config.backend.complete(apiKey, model, prompt)
   const parsed = tools.length > 0 ? parseToolCallBlock(raw) : { content: raw.trim(), toolCalls: [] }
   const finishReason = parsed.toolCalls.length > 0 ? 'tool_calls' : 'stop'
-  const id = `chatcmpl-dsh-cursor-${String(Date.now())}`
   if (body.stream === true) {
     res.writeHead(200, {
       'cache-control': 'no-cache',

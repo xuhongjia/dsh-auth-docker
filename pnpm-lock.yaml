@@ -30,7 +30,7 @@ importers:
   plugins/dsh-cursor-plugin:
     dependencies:
       '@cursor/sdk':
-        specifier: ^1.0.10
+        specifier: ^1.0.27
         version: 1.0.28
       '@deepseek-ai/cordis':
         specifier: '*'

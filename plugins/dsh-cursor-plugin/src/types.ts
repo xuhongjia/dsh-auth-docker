@@ -32,6 +32,7 @@ export interface ChatCompletionRequest {
   tools?: OpenAIFunctionTool[]
   tool_choice?: unknown
   stream?: boolean
+  reasoning_effort?: string
 }
 
 export interface CompletionResult {

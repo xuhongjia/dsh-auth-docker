@@ -1,13 +1,13 @@
 import { mkdir } from 'node:fs/promises'
+import { expandModelCatalog, fallbackModels } from './catalog.ts'
+import { DEFAULT_MODEL, parseModelSelection, type ParseModelOptions } from './model-selection.ts'
 import type { CursorBackend, ModelInfo } from './types.ts'
-
-const DEFAULT_MODEL = 'composer-2.5'
 
 interface SdkAgent {
   send(
     message: string,
     options?: {
-      model?: { id: string }
+      model?: { id: string; params?: Array<{ id: string; value: string }> }
       onDelta?: (args: { update: { type?: string; text?: string } }) => void
     },
   ): Promise<{ wait?: () => Promise<unknown>; cancel?: () => Promise<void> }>
@@ -20,35 +20,58 @@ interface SdkModule {
   }
   Cursor: {
     models: {
-      list(options?: { apiKey?: string }): Promise<Array<{ id: string; displayName?: string }>>
+      list(options?: { apiKey?: string }): Promise<unknown>
     }
   }
 }
 
+/** Cursor native tools that must not run; DSH owns bash/edit/read. */
+const DISALLOWED_CURSOR_TOOLS = [
+  'shell',
+  'task',
+  'bash',
+  'terminal',
+  'write',
+  'edit',
+  'delete',
+  'apply_patch',
+  'mcp',
+  'web_search',
+  'browser',
+]
+
+export interface SdkBackendOptions extends ParseModelOptions {}
+
 /**
- * Cursor SDK backend. Built-in tools are empty so DSH executes its own tools.
+ * Cursor SDK backend. Built-in tools stay empty so DSH executes its own tools.
+ * Model ids follow pi-cursor-sdk qualifiers (`@context`, `:fast`/`:slow`, thinking).
  */
-export function createSdkBackend(workspace: string): CursorBackend {
+export function createSdkBackend(workspace: string, options: SdkBackendOptions = {}): CursorBackend {
+  const parseOptions: ParseModelOptions = { defaultFast: options.defaultFast ?? false }
   return {
     async listModels(apiKey: string): Promise<ModelInfo[]> {
-      const sdk = await loadSdk()
-      const models = await sdk.Cursor.models.list({ apiKey })
-      if (models.length === 0) return [{ id: DEFAULT_MODEL, name: 'Composer 2.5' }]
-      return models
-        .filter((model) => typeof model.id === 'string' && model.id.length > 0)
-        .map((model) => ({
-          id: model.id,
-          name: model.displayName,
-        }))
+      try {
+        const sdk = await loadSdk()
+        const models = await sdk.Cursor.models.list({ apiKey })
+        const items = Array.isArray(models) ? models : []
+        const catalog = expandModelCatalog(items)
+        return catalog.length > 0 ? catalog : fallbackModels()
+      } catch {
+        return fallbackModels()
+      }
     },
     async complete(apiKey, model, prompt, onTextDelta): Promise<string> {
       const sdk = await loadSdk()
       await mkdir(workspace, { recursive: true })
+      const selection = parseModelSelection(model, parseOptions)
+      const modelOption = selection.params.length > 0
+        ? { id: selection.id, params: selection.params }
+        : { id: selection.id }
       const agent = await sdk.Agent.create({
         apiKey,
-        model: { id: model.length > 0 ? model : DEFAULT_MODEL },
+        model: modelOption,
         tools: [],
-        disallowedTools: ['shell', 'task'],
+        disallowedTools: DISALLOWED_CURSOR_TOOLS,
         local: {
           cwd: workspace,
           settingSources: [],
@@ -57,7 +80,7 @@ export function createSdkBackend(workspace: string): CursorBackend {
       const chunks: string[] = []
       try {
         const run = await agent.send(prompt, {
-          model: { id: model.length > 0 ? model : DEFAULT_MODEL },
+          model: modelOption,
           onDelta: ({ update }) => {
             if (update.type === 'text-delta' && typeof update.text === 'string' && update.text.length > 0) {
               chunks.push(update.text)
@@ -99,4 +122,4 @@ async function disposeAgent(sdk: SdkModule, agent: SdkAgent): Promise<void> {
   }
 }
 
-export { DEFAULT_MODEL }
+export { DEFAULT_MODEL, DISALLOWED_CURSOR_TOOLS }

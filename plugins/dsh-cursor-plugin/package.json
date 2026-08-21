@@ -1,6 +1,6 @@
 {
   "name": "dsh-cursor-plugin",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "description": "Loopback OpenAI-compatible gateway for Cursor dashboard keys in DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",
@@ -32,7 +32,7 @@
     "url": "git+https://github.com/xuhongjia/dsh-auth-docker.git"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.10"
+    "@cursor/sdk": "^1.0.27"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*"

@@ -65,9 +65,14 @@ function textContent(content: unknown): string {
     return content
       .map((part) => {
         if (typeof part === 'string') return part
-        if (part !== null && typeof part === 'object' && 'text' in part) {
-          const text = (part as { text?: unknown }).text
-          return typeof text === 'string' ? text : ''
+        if (part !== null && typeof part === 'object') {
+          if ('text' in part) {
+            const text = (part as { text?: unknown }).text
+            return typeof text === 'string' ? text : ''
+          }
+          if ('image_url' in part || (part as { type?: unknown }).type === 'image_url') {
+            return '[image attached]'
+          }
         }
         return ''
       })

@@ -12,12 +12,13 @@ afterEach(async () => {
   }
 })
 
-function backend(complete: string): CursorBackend {
+function backend(complete: string, deltas?: string[]): CursorBackend {
   return {
     async listModels() {
       return [{ id: 'composer-2.5', name: 'Composer 2.5' }]
     },
-    async complete() {
+    async complete(_apiKey, _model, _prompt, onTextDelta) {
+      for (const delta of deltas ?? []) onTextDelta?.(delta)
       return complete
     },
   }
@@ -94,5 +95,65 @@ describe('listenCursorGateway', () => {
     }
     expect(body.choices[0]?.finish_reason).toBe('tool_calls')
     expect(body.choices[0]?.message.tool_calls?.[0]?.function.name).toBe('bash')
+  })
+
+  it('streams text deltas when DSH did not send tools', async () => {
+    gateway = await listenCursorGateway({
+      listenHost: '127.0.0.1',
+      listenPort: 0,
+      backend: backend('Hello', ['Hel', 'lo']),
+      logger: { info() {}, warn() {} },
+    })
+    const origin = `http://127.0.0.1:${String(gateway.port)}`
+    const response = await fetch(`${origin}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer crsr_test',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'composer-2.5',
+        stream: true,
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    })
+    expect(response.status).toBe(200)
+    const body = await response.text()
+    expect(body).toContain('"content":"Hel"')
+    expect(body).toContain('"content":"lo"')
+    expect(body).toContain('data: [DONE]')
+  })
+
+  it('appends reasoning_effort when the model id has no thinking suffix', async () => {
+    let seen = ''
+    gateway = await listenCursorGateway({
+      listenHost: '127.0.0.1',
+      listenPort: 0,
+      backend: {
+        async listModels() {
+          return []
+        },
+        async complete(_apiKey, model) {
+          seen = model
+          return 'ok'
+        },
+      },
+      logger: { info() {}, warn() {} },
+    })
+    const origin = `http://127.0.0.1:${String(gateway.port)}`
+    const response = await fetch(`${origin}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer crsr_test',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-5.5',
+        reasoning_effort: 'high',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    })
+    expect(response.status).toBe(200)
+    expect(seen).toBe('gpt-5.5:high')
   })
 })

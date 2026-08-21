@@ -14,6 +14,8 @@ export interface CursorPluginConfig {
   listenHost?: string
   listenPort?: number
   workspace?: string
+  /** Composer defaults to Cursor fast; false matches pi-cursor-sdk `--cursor-no-fast`. */
+  defaultFast?: boolean
 }
 
 interface PluginContext {
@@ -32,7 +34,7 @@ export async function apply(ctx: PluginContext, config: CursorPluginConfig = {})
     const gateway = await listenCursorGateway({
       listenHost,
       listenPort,
-      backend: createSdkBackend(workspace),
+      backend: createSdkBackend(workspace, { defaultFast: config.defaultFast ?? false }),
       logger: ctx.logger,
     })
     ctx.effect(() => async () => {

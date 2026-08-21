@@ -61,6 +61,18 @@ describe('serializeMessages', () => {
     expect(prompt).toContain('Assistant requested tools: bash')
     expect(prompt).toContain('Tool result (call_1):\na.ts\nb.ts')
   })
+
+  it('mentions image parts so the SDK prompt is not empty', () => {
+    const prompt = serializeMessages([{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'What is in this picture?' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } },
+      ],
+    }])
+    expect(prompt).toContain('What is in this picture?')
+    expect(prompt).toContain('[image attached]')
+  })
 })
 
 describe('buildToolLoopPrompt', () => {
