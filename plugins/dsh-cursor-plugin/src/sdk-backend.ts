@@ -25,19 +25,17 @@ interface SdkModule {
   }
 }
 
-/** Cursor native tools that must not run; DSH owns bash/edit/read. */
+/**
+ * Cursor Agent.create `disallowedTools` must use SDK names only.
+ * Unknown ids (bash, terminal, write, apply_patch, web_search, browser) 500 the turn.
+ * `mcp` stays allowed so DSH MCP / Cursor MCP is not blocked at Agent.create.
+ */
 const DISALLOWED_CURSOR_TOOLS = [
   'shell',
   'task',
-  'bash',
-  'terminal',
-  'write',
-  'edit',
-  'delete',
-  'apply_patch',
-  'mcp',
-  'web_search',
-  'browser',
+  'computerUse',
+  'applyAgentDiff',
+  'writeShellStdin',
 ]
 
 export interface SdkBackendOptions extends ParseModelOptions {}

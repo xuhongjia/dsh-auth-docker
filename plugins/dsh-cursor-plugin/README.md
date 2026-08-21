@@ -4,7 +4,7 @@ English | [中文](#中文)
 
 Loopback OpenAI-compatible gateway for a Cursor dashboard API key (`crsr_…`). DeepSeek Harness **Settings → Models** shows a Cursor card; paste the key there. `llm-pi-ai` calls `http://127.0.0.1:3090/v1`. The Harness agent loop still runs DSH tools and skills.
 
-This is not Cloud Agents (`POST /v1/agents`) and not the `pi` CLI. The gateway uses official `@cursor/sdk` the same way [pi-cursor-sdk](https://github.com/fitchmultz/pi-cursor-sdk) talks to Cursor (live `Cursor.models.list`, `fast` / thinking / context params, `text-delta` streaming), then exposes that as OpenAI `/v1` so DSH stays the tool host. `tools: []` plus a wider `disallowedTools` list keeps Cursor shell/edit/MCP off. If the SDK ignores that, it may still touch `$DSH_HOME/cursor-gateway`. Do not point `CURSOR_BASE_URL` at `https://api.cursor.com`.
+This is not Cloud Agents (`POST /v1/agents`) and not the `pi` CLI. The gateway uses official `@cursor/sdk` the same way [pi-cursor-sdk](https://github.com/fitchmultz/pi-cursor-sdk) talks to Cursor (live `Cursor.models.list`, `fast` / thinking / context params, `text-delta` streaming), then exposes that as OpenAI `/v1` so DSH stays the tool host. `tools: []` plus `disallowedTools` limited to SDK names (`shell`, `task`, …) keeps Cursor's own shell off; unknown names 500 the turn. MCP stays allowed. If the SDK ignores an empty toolset, it may still touch `$DSH_HOME/cursor-gateway`. Do not point `CURSOR_BASE_URL` at `https://api.cursor.com`.
 
 ## Use
 
@@ -41,7 +41,7 @@ cordis.patch.yml     Inserts this plugin and a llm-pi-ai cursor route
 
 把 Cursor 后台 API Key（`crsr_…`）变成 DSH 能调的 loopback OpenAI 接口。登录后在 **Settings → Models** 的 Cursor 卡片里填 Key。`llm-pi-ai` 请求 `http://127.0.0.1:3090/v1`。会话里的 tools / skills 仍由 DSH 执行。
 
-这不是 Cloud Agents，也不是 `pi` CLI。网关按 [pi-cursor-sdk](https://github.com/fitchmultz/pi-cursor-sdk) 的方式用官方 `@cursor/sdk`（实时模型目录、`fast`/thinking/上下文参数、`text-delta` 流式），再做成 OpenAI `/v1`，tools 仍归 DSH。`tools: []` 并扩大 `disallowedTools`，尽量关掉 Cursor 自带的 shell/写文件/MCP。若 SDK 无视空 toolset，仍可能改 `$DSH_HOME/cursor-gateway`。不要把地址填成 `https://api.cursor.com`。
+这不是 Cloud Agents，也不是 `pi` CLI。网关按 [pi-cursor-sdk](https://github.com/fitchmultz/pi-cursor-sdk) 的方式用官方 `@cursor/sdk`（实时模型目录、`fast`/thinking/上下文参数、`text-delta` 流式），再做成 OpenAI `/v1`，tools 仍归 DSH。`tools: []` 且 `disallowedTools` 只用 SDK 合法名（`shell`、`task` 等）；写 `bash`/`web_search` 这类名字会整轮 500。MCP 不禁用。若 SDK 无视空 toolset，仍可能改 `$DSH_HOME/cursor-gateway`。不要把地址填成 `https://api.cursor.com`。
 
 模型 id 沿用 pi-cursor-sdk 后缀：
 
