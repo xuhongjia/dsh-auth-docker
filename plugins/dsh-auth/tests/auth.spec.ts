@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { createAuth, ensureDatabaseFile, migrateAuth, seedInitialUser } from '../src/auth.ts'
 import { resolveAuthConfig, safeRedirect } from '../src/config.ts'
 import { listenAuthGateway } from '../src/gateway.ts'
-import { isUnpairedHeartbeatResponse, loopbackOrigin, upstreamHeaders } from '../src/proxy.ts'
+import { isUnpairedHeartbeatResponse, loopbackOrigin, stripRemoteChannelPath, upstreamHeaders } from '../src/proxy.ts'
 
 const SECRET = 'dsh-auth-test-secret-value-32chars!'
 const PASSWORD = 'correct-horse-battery-staple'
@@ -157,6 +157,17 @@ describe('dsh-auth reverse proxy', () => {
     db.close()
   })
 
+  it('maps marketplace /remote channel paths onto loopback /api', () => {
+    expect(stripRemoteChannelPath('/remote/api/settings.describe')).toBe('/api/settings.describe')
+    expect(stripRemoteChannelPath('/remote/api/events.mux?x=1')).toBe('/api/events.mux?x=1')
+    expect(stripRemoteChannelPath('/remote/sidebar/ws/terminal')).toBe('/sidebar/ws/terminal')
+    expect(stripRemoteChannelPath('/remote/sidebar/api/shell.get')).toBe('/sidebar/api/shell.get')
+    expect(stripRemoteChannelPath('/workspace')).toBe('/workspace')
+    expect(stripRemoteChannelPath('/api/pair/heartbeat')).toBe('/api/pair/heartbeat')
+    expect(stripRemoteChannelPath('/remote/api/../secret')).toBe('/remote/api/../secret')
+    expect(stripRemoteChannelPath('/m/api/session.list')).toBe('/m/api/session.list')
+  })
+
   it('rewrites Host and Origin onto the loopback authority', () => {
     const headers = upstreamHeaders({
       host: 'dsh.example.com',
@@ -228,6 +239,32 @@ describe('dsh-auth reverse proxy', () => {
     expect(body).toContain('xri=undefined')
     expect(body).toContain('fwd=undefined')
     expect(body).toContain('sfs=undefined')
+  })
+
+  it('strips /remote so a signed-in public desktop hits loopback /api', { timeout: 20_000 }, async () => {
+    const { port } = await boot()
+    const cookie = await signInCookie(port)
+    const proxied = await fetch(`http://127.0.0.1:${String(port)}/remote/api/settings.describe`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(proxied.status).toBe(200)
+    const body = await proxied.text()
+    expect(body).toContain('POST /api/settings.describe')
+    expect(body).not.toContain('/remote/api')
+  })
+
+  it('strips /remote/sidebar so sidebar RPCs are not pairing-gated', { timeout: 20_000 }, async () => {
+    const { port } = await boot()
+    const cookie = await signInCookie(port)
+    const proxied = await fetch(`http://127.0.0.1:${String(port)}/remote/sidebar/api/shell.get`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(proxied.status).toBe(200)
+    expect(await proxied.text()).toContain('POST /sidebar/api/shell.get')
   })
 
   it('does not overwrite an existing user on later boots', { timeout: 20_000 }, async () => {

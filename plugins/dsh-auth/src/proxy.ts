@@ -97,6 +97,39 @@ function headerLines(headers: IncomingHttpHeaders): string[] {
 
 const PAIRED_HEARTBEAT_BODY = Buffer.from(JSON.stringify({ ok: true }))
 
+/** Marketplace remote-web-ui prefix; the client rewrites fenced `/api` here. */
+const REMOTE_CHANNEL_PREFIX = '/remote'
+
+/** Inner paths the desktop client mounts under `/remote`. */
+const REMOTE_INNER_PREFIXES = ['/api', '/sidebar', '/git', '/pet']
+
+/**
+ * Map marketplace `/remote/api/…` onto loopback `/api/…` (same for sidebar/git/pet).
+ * A Better Auth session already passed the public gate; Host/Origin are rewritten
+ * to loopback, so the pairing cookie is not the access control on this hop.
+ * Unsafe segments and non-channel prefixes are left unchanged.
+ */
+export function stripRemoteChannelPath(url: string | undefined): string {
+  const raw = url ?? '/'
+  let parsed: URL
+  try {
+    parsed = new URL(raw, 'http://127.0.0.1')
+  } catch {
+    return raw
+  }
+  const pathname = parsed.pathname
+  if (!pathname.startsWith(`${REMOTE_CHANNEL_PREFIX}/`)) return raw
+  const inner = pathname.slice(REMOTE_CHANNEL_PREFIX.length)
+  if (!REMOTE_INNER_PREFIXES.some((prefix) => inner === prefix || inner.startsWith(`${prefix}/`))) {
+    return raw
+  }
+  const segments = inner.slice(1).split('/')
+  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
+    return raw
+  }
+  return `${inner}${parsed.search}`
+}
+
 /**
  * True when upstream is the marketplace pairing plugin refusing an unpaired
  * `POST /api/pair/heartbeat`. A Better Auth session already passed the public
@@ -139,7 +172,7 @@ export function proxyHttp(req: IncomingMessage, res: ServerResponse, port: numbe
   const upstream = requestHttp({
     hostname: '127.0.0.1',
     port,
-    path: req.url,
+    path: stripRemoteChannelPath(req.url),
     method: req.method,
     headers: upstreamHeaders(req.headers, upstreamHost),
   }, (upRes) => {
@@ -207,7 +240,7 @@ export function proxyUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer,
   socket.on('error', () => { upstream.destroy() })
   upstream.once('connect', () => {
     const lines = [
-      `${req.method ?? 'GET'} ${req.url ?? '/'} HTTP/1.1`,
+      `${req.method ?? 'GET'} ${stripRemoteChannelPath(req.url)} HTTP/1.1`,
       ...headerLines(upstreamHeaders(req.headers, upstreamHost, 'upgrade')),
       '',
       '',

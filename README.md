@@ -23,14 +23,14 @@ Behind HTTPS (Caddy, nginx, Cloudflare), set `DSH_AUTH_BASE_URL` to that origin 
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.12
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.13
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.12
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.13
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -81,6 +81,7 @@ See [plugins/README.md](plugins/README.md) and [plugins/dsh-cursor-plugin/README
 - **One initial account** — public sign-up is disabled; the first administrator is seeded once.
 - **Official Harness stays loopback-only** — this proxy is the network face. Do not publish the internal webserver port.
 - **Public-origin pairing heartbeat** — marketplace `dsh-remote-web-ui` treats `https://…` as LAN and `POST /api/pair/heartbeat` 401s `unpaired` when the browser has no `dsh_pair` cookie. A signed-in Better Auth session rewrites that unpaired body to `{"ok":true}`. A live pairing cookie still reaches upstream so phone/desktop presence stays accurate. QR pairing is unchanged.
+- **Public-origin `/remote` channel** — the same plugin rewrites desktop `/api` to `/remote/api` and shows “This device is not paired” without a pairing cookie. After Better Auth login, this proxy strips `/remote` and forwards `/api` (and `/sidebar`, `/git`, `/pet`) as loopback, so the public desktop does not need a second device-pair. Phone `/m/` QR pairing is unchanged.
 - **Plugin same-origin loopback** — after login, the proxy rewrites `Host` and `Origin` to `http://127.0.0.1:<internal>` and strips forwarding headers (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`, …). Plugin Market update/restart and other plugins that require Origin to match Host then see a local same-origin call. Better Auth remains the public gate. In Docker, a successful Market restart still replaces the `dsh` process; if that process is PID 1 the container exits.
 
 ## Broken `cordis.patch.yml` after plugin install
