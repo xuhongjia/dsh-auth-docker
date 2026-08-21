@@ -14,8 +14,8 @@ RUN apt-get update \
   && corepack prepare pnpm@11.22.0 \
   && chmod -R a+rwX "$COREPACK_HOME"
 
-# Official Harness, not a fork. Pin the published CLI.
-ARG DSH_VERSION=0.1.0-rc.7
+# Official Harness, not a fork. Default is npm latest; override at build time.
+ARG DSH_VERSION=latest
 RUN npm install -g "@deepseek-ai/dsh@${DSH_VERSION}"
 
 WORKDIR /opt
