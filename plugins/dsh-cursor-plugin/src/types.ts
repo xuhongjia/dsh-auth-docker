@@ -45,6 +45,14 @@ export interface ModelInfo {
   name?: string
 }
 
+/** Loose Cursor.models.list row. Extra fields are ignored. */
+export interface CursorListItem {
+  id?: unknown
+  displayName?: unknown
+  aliases?: unknown
+  parameters?: unknown
+}
+
 export interface CursorBackend {
   listModels(apiKey: string): Promise<ModelInfo[]>
   complete(

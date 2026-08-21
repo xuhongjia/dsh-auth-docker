@@ -11,7 +11,9 @@ This is not Cloud Agents (`POST /v1/agents`) and not the `pi` CLI. The gateway u
 1. Log in to the Harness Web UI.
 2. Open Settings → Models → Cursor.
 3. Paste the dashboard key. It is stored write-only in `$DSH_HOME/.credentials.yaml`.
-4. Select a Cursor model (default `composer-2.5`, or Fetch available models).
+4. Select a Cursor model (Composer 2.5, Grok, GPT-5.5, Claude, …). Qualifiers: `:slow`/`:fast`, `@1m`. Thinking uses the DSH reasoning control (`reasoning_effort`).
+
+If Settings → Models → Cursor only shows `auto`, an older `providers.cursor.models` overlay is winning. Use **Restore defaults** on that card, or Fetch available models after the key is saved.
 
 Model ids follow pi-cursor-sdk qualifiers:
 
@@ -42,6 +44,8 @@ cordis.patch.yml     Inserts this plugin and a llm-pi-ai cursor route
 把 Cursor 后台 API Key（`crsr_…`）变成 DSH 能调的 loopback OpenAI 接口。登录后在 **Settings → Models** 的 Cursor 卡片里填 Key。`llm-pi-ai` 请求 `http://127.0.0.1:3090/v1`。会话里的 tools / skills 仍由 DSH 执行。
 
 这不是 Cloud Agents，也不是 `pi` CLI。网关按 [pi-cursor-sdk](https://github.com/fitchmultz/pi-cursor-sdk) 的方式用官方 `@cursor/sdk`（实时模型目录、`fast`/thinking/上下文参数、`text-delta` 流式），再做成 OpenAI `/v1`，tools 仍归 DSH。`tools: []` 且 `disallowedTools` 只用 SDK 合法名（`shell`、`task` 等）；写 `bash`/`web_search` 这类名字会整轮 500。MCP 不禁用。若 SDK 无视空 toolset，仍可能改 `$DSH_HOME/cursor-gateway`。不要把地址填成 `https://api.cursor.com`。
+
+会话模型列表按 pi 的 Cursor 目录展开（Composer / Grok / GPT / Claude 以及 `@1m`、`:fast`/`:slow`）。思考强度用 DSH 的 reasoning 控件。若卡片里仍只有 `auto`，点 **Restore defaults**，或填 Key 后 Fetch available models。
 
 模型 id 沿用 pi-cursor-sdk 后缀：
 

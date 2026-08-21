@@ -36,7 +36,7 @@ export interface ParseModelOptions {
  */
 export function parseModelSelection(raw: string, options: ParseModelOptions = {}): ModelSelection {
   const trimmed = raw.trim()
-  const source = trimmed.length === 0 || trimmed === 'auto' ? DEFAULT_MODEL : trimmed
+  const source = trimmed.length === 0 || trimmed === 'auto' ? 'default' : trimmed
   const match = /^([^:@]+)(?:@([^:]+))?(?::(.*))?$/.exec(source)
   const id = match?.[1] ?? DEFAULT_MODEL
   const context = match?.[2]
@@ -65,7 +65,7 @@ export function parseModelSelection(raw: string, options: ParseModelOptions = {}
       thinking = suffix === 'extra-high' ? 'xhigh' : suffix
     }
   }
-  if (fast === undefined && options.defaultFast !== undefined) {
+  if (fast === undefined && options.defaultFast !== undefined && id.startsWith('composer-')) {
     fast = options.defaultFast
   }
   if (fast !== undefined) {

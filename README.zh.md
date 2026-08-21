@@ -23,14 +23,14 @@ docker compose up --build
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.14
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.15
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.14
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.15
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { expandModelCatalog, fallbackModels } from '../src/catalog.ts'
 
 describe('expandModelCatalog', () => {
-  it('always includes auto and expands context plus fast aliases', () => {
+  it('always expands context plus fast aliases on the canonical id', () => {
     const models = expandModelCatalog([{
       id: 'gpt-5.5',
       displayName: 'GPT-5.5',
@@ -13,14 +13,18 @@ describe('expandModelCatalog', () => {
       ],
     }])
     const ids = models.map((model) => model.id)
-    expect(ids).toContain('auto')
     expect(ids).toContain('gpt-5.5')
     expect(ids).toContain('gpt-5.5@1m')
     expect(ids).toContain('gpt-5.5@1m:slow')
-    expect(ids).toContain('gpt-5.5-latest@272k:fast')
+    expect(ids).not.toContain('gpt-5.5-latest')
   })
 
-  it('falls back when the live list is empty', () => {
-    expect(expandModelCatalog([])).toEqual(fallbackModels())
+  it('falls back to the bundled Cursor catalog when the live list is empty', () => {
+    const models = expandModelCatalog([])
+    const ids = models.map((model) => model.id)
+    expect(ids).toEqual(fallbackModels().map((model) => model.id))
+    expect(ids).toContain('composer-2.5')
+    expect(ids).toContain('gpt-5.5')
+    expect(ids).toContain('grok-4.6:slow')
   })
 })

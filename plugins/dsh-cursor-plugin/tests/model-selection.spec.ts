@@ -2,12 +2,19 @@ import { describe, expect, it } from 'vitest'
 import { parseModelSelection, withReasoningEffort } from '../src/model-selection.ts'
 
 describe('parseModelSelection', () => {
-  it('maps auto and empty ids to composer-2.5 with defaultFast false', () => {
-    expect(parseModelSelection('auto', { defaultFast: false })).toEqual({
-      id: 'composer-2.5',
-      params: [{ id: 'fast', value: 'false' }],
+  it('maps auto and empty ids to Cursor Auto', () => {
+    expect(parseModelSelection('auto')).toEqual({
+      id: 'default',
+      params: [],
     })
-    expect(parseModelSelection('', { defaultFast: false }).id).toBe('composer-2.5')
+    expect(parseModelSelection('').id).toBe('default')
+  })
+
+  it('applies defaultFast only to Composer ids', () => {
+    expect(parseModelSelection('composer-2.5', { defaultFast: false }).params).toEqual([
+      { id: 'fast', value: 'false' },
+    ])
+    expect(parseModelSelection('gpt-5.5', { defaultFast: false }).params).toEqual([])
   })
 
   it('parses context, fast, and thinking suffixes like pi-cursor-sdk', () => {
