@@ -1,6 +1,6 @@
 services:
   dsh:
-    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.16}
+    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.17}
     build: .
     ports:
       - "3080:3080"

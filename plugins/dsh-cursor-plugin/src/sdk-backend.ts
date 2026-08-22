@@ -1,7 +1,13 @@
 import { mkdir } from 'node:fs/promises'
-import { expandModelCatalog, fallbackModels } from './catalog.ts'
+import {
+  applyCatalogDefaults,
+  expandModelCatalog,
+  fallbackModels,
+  findCatalogItem,
+} from './catalog.ts'
+import { FALLBACK_CURSOR_ITEMS } from './fallback-models.ts'
 import { DEFAULT_MODEL, parseModelSelection, type ParseModelOptions } from './model-selection.ts'
-import type { CursorBackend, ModelInfo } from './types.ts'
+import type { CursorBackend, CursorListItem, ModelInfo } from './types.ts'
 
 interface SdkAgent {
   send(
@@ -42,17 +48,19 @@ export interface SdkBackendOptions extends ParseModelOptions {}
 
 /**
  * Cursor SDK backend. Built-in tools stay empty so DSH executes its own tools.
- * Model ids follow pi-cursor-sdk qualifiers (`@context`, `:fast`/`:slow`, thinking).
+ * Picker ids are canonical Cursor models; qualifiers (`@context`, `:fast`, thinking) still parse.
  */
 export function createSdkBackend(workspace: string, options: SdkBackendOptions = {}): CursorBackend {
   const parseOptions: ParseModelOptions = { defaultFast: options.defaultFast ?? false }
+  let catalogItems: CursorListItem[] = FALLBACK_CURSOR_ITEMS
   return {
     async listModels(apiKey: string): Promise<ModelInfo[]> {
       try {
         const sdk = await loadSdk()
         const models = await sdk.Cursor.models.list({ apiKey })
-        const items = Array.isArray(models) ? models : []
+        const items = Array.isArray(models) ? models as CursorListItem[] : []
         const catalog = expandModelCatalog(items)
+        if (items.length > 0 && catalog.length > 0) catalogItems = items
         return catalog.length > 0 ? catalog : fallbackModels()
       } catch {
         return fallbackModels()
@@ -61,7 +69,10 @@ export function createSdkBackend(workspace: string, options: SdkBackendOptions =
     async complete(apiKey, model, prompt, onTextDelta): Promise<string> {
       const sdk = await loadSdk()
       await mkdir(workspace, { recursive: true })
-      const selection = parseModelSelection(model, parseOptions)
+      const parsed = parseModelSelection(model, parseOptions)
+      const item = findCatalogItem(catalogItems, parsed.id)
+        ?? findCatalogItem(FALLBACK_CURSOR_ITEMS, parsed.id)
+      const selection = applyCatalogDefaults(parsed, item, parseOptions)
       const modelOption = selection.params.length > 0
         ? { id: selection.id, params: selection.params }
         : { id: selection.id }

@@ -1,6 +1,6 @@
 {
   "name": "dsh-cursor-plugin",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "description": "Loopback OpenAI-compatible gateway for Cursor dashboard keys in DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",
