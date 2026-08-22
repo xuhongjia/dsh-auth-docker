@@ -31,7 +31,9 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
   && chown -R node:node /home/node /opt
 
 # Official sandbox (bwrap/Landlock) mounts / read-only and only writes
-# workspace + /tmp. Keep npm/pnpm caches off /root and /home/node.
+# workspace + /tmp. Agent npm/xdg caches stay on /tmp. The pnpm store for
+# `dsh plugin add` lives on /data so NAS/container recreates keep marketplace
+# plugins (a /tmp store is wiped and then looks like an unresolvable bundle).
 ENV DSH_HOME=/data \
     PORT=3080 \
     DSH_AUTH_BASE_URL=http://127.0.0.1:3080 \
@@ -42,7 +44,7 @@ ENV DSH_HOME=/data \
     npm_config_cache=/tmp/npm-cache \
     npm_config_logs_dir=/tmp/npm-cache/_logs \
     npm_config_update_notifier=false \
-    PNPM_STORE_DIR=/tmp/pnpm-store \
+    PNPM_STORE_DIR=/data/pnpm-store \
     XDG_CACHE_HOME=/tmp/xdg-cache \
     COREPACK_HOME=/usr/local/share/corepack \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0

@@ -1,7 +1,8 @@
 services:
   dsh:
-    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.17}
+    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.18}
     build: .
+    restart: unless-stopped
     ports:
       - "3080:3080"
     environment:

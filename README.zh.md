@@ -16,21 +16,42 @@ docker compose up --build
 
 打开 `http://localhost:3080`。第一次启动会用 `DSH_AUTH_PASSWORD` 创建 `admin`。之后复用 `/data/auth/auth.sqlite`，不再读取该密码。
 
-若前面有 HTTPS 反代（Caddy、nginx、Cloudflare），把 `DSH_AUTH_BASE_URL` 设成该 origin，并设置 `DSH_AUTH_SECURE_COOKIES=1`。
+若前面有 HTTPS 反代（Caddy、nginx、Cloudflare、极空间反代），把 `DSH_AUTH_BASE_URL` 设成该 origin，并设置 `DSH_AUTH_SECURE_COOKIES=1`。
+
+## 极空间 / NAS
+
+`/data` 用 NAS 共享盘 bind-mount 时，保持 `PUID=0`（root），这样 `dsh plugin add` 才能改写 pnpm 的 `0444` 文件。只持久化映射 **一个目录到 `/data`**（登录库、settings、市场插件、pnpm store）。不要只映射 `/tmp`。
+
+浏览器实际打开的公网地址要写进环境变量，例如：
+
+```
+DSH_AUTH_BASE_URL=https://dsh.example.com
+DSH_AUTH_SECURE_COOKIES=1
+```
+
+OpenViking Memory 是另一个进程。在本容器里 `http://127.0.0.1:1933` **不是** 极空间主机。请改成 NAS 局域网 IP、`host-gateway`，或把 OpenViking 接到同一 Docker 网络。
+
+Plugin Market 的「重启」会替换 PID 1，容器会退出；`restart: unless-stopped` 会拉起来。共享盘正常后，被摘掉的市场插件可以重装：
+
+```sh
+docker compose exec dsh dsh plugin --profile web add @openviking/dsh-memory-plugin
+```
+
+公网域名下 Settings → Models 是官方 DSH 的 loopback 限制。在 NAS 上仍可把 key 写进持久化的 `/data/.credentials.yaml`（权限 `600`），把供应商路由写进 `/data/settings.yaml`。
 
 ## 拉取已发布镜像
 
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.17
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.18
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.17
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.18
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d
@@ -83,6 +104,8 @@ Dockerfile                 npm i -g @deepseek-ai/dsh，然后对 plugins/* 逐�
 - **公网来源的配对心跳** —— 市场插件 `dsh-remote-web-ui` 把 `https://…` 当成局域网；浏览器没有 `dsh_pair` cookie 时，`POST /api/pair/heartbeat` 会 401 `unpaired`。已登录的 Better Auth 会话会把这条 unpaired 响应改写成 `{"ok":true}`。真正带配对 cookie 的请求仍打到上游，手机/远程桌面在线状态不受影响。扫码配对流程不变。
 - **公网 `/remote` 通道** —— 同一插件会把桌面 `/api` 改写成 `/remote/api`，没有配对 cookie 就整页「此设备未配对」。Better Auth 登录后，本代理会剥掉 `/remote`，把 `/api`（以及 `/sidebar`、`/git`、`/pet`）当 loopback 转发，公网桌面不再需要第二次设备配对。手机 `/m/` 扫码配对不变。
 - **插件同源 loopback** —— 登录后代理会把 `Host` 和 `Origin` 改写成 `http://127.0.0.1:<内部端口>`，并去掉转发头（`X-Forwarded-For`、`Forwarded`、`X-Real-IP` 等）。Plugin Market 的更新/重启，以及其它要求 Origin 必须等于 Host 的插件，就会看成是本机同源请求。Better Auth 仍是公网门禁。在 Docker 里，Market 重启成功后仍会替换当前 `dsh` 进程；如果它是 PID 1，容器会退出。
+- **容器里不开浏览器** —— 官方 `dsh web` 默认会调系统浏览器。镜像里关掉了 `openBrowser`，并带 `--no-open`。
+- **SQLite ExperimentalWarning** —— Better Auth 用的是 Node 内置 `node:sqlite`。这是 Node 的实验提示，不是启动失败。
 
 ## 在线装插件后 `cordis.patch.yml` 损坏
 
@@ -101,7 +124,7 @@ docker compose up -d
 
 容器默认以 **root** 运行（`PUID=0`）。适合只 bind-mount 一个 `/data` 目录（例如 NAS 共享盘）：root 能改写 pnpm 打成 `0444` 的包，`dsh plugin add` 不会再因 EACCES 失败。只有需要降权时才设 `PUID`/`PGID`；此时入口脚本会 chown `/data` 再 `gosu` 到该用户。
 
-官方 DSH sandbox（bwrap / Landlock）把 `/` 只读挂上，只允许写会话 workspace 和 `/tmp`。因此 npm/pnpm 缓存指到 `/tmp`，而不是 `/root/.npm`。若日志停在 Corepack 的 Yes/No 下载提示，用 `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` 重建（compose 已带）。
+官方 DSH sandbox（bwrap / Landlock）把 `/` 只读挂上，只允许写会话 workspace 和 `/tmp`。Agent 用的 npm/xdg 缓存仍在 `/tmp`。`dsh plugin add` 的 pnpm store 在 `/data/pnpm-store`，避免极空间重建容器后市场插件变成「无法 resolve」。若日志停在 Corepack 的 Yes/No 下载提示，用 `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` 重建（compose 已带）。
 
 `credentials-local` 要求 `$DSH_HOME/.credentials.yaml` 不能被同组或其他用户读到。入口脚本每次启动都会把它设成 `600`。若主机上的 chmod 把它弄成了 `666`，也在主机上修一次：
 
@@ -109,4 +132,8 @@ docker compose up -d
 chmod 600 /你的/dsh数据目录/.credentials.yaml
 ```
 
-`dsh.profile.bundles` 里无法 resolve 的半残插件会在启动时被摘掉，保证 `/login` 能起来；再用 `dsh plugin add` 重装。
+`dsh.profile.bundles` 里无法 resolve 的半残插件（例如容器重建后 `@openviking/dsh-memory-plugin` 的文件丢了）会先尝试 `dsh plugin add` 重装。仍然 resolve 不到的才会被摘掉，保证 `/login` 能起来。网络正常后可手动重装被摘掉的 npm 插件：
+
+```sh
+docker compose exec dsh dsh plugin --profile web add @openviking/dsh-memory-plugin
+```

@@ -16,7 +16,7 @@ export TMPDIR="${TMPDIR:-/tmp}"
 export NPM_CONFIG_CACHE="${NPM_CONFIG_CACHE:-/tmp/npm-cache}"
 export npm_config_cache="$NPM_CONFIG_CACHE"
 export npm_config_logs_dir="${npm_config_logs_dir:-$NPM_CONFIG_CACHE/_logs}"
-export PNPM_STORE_DIR="${PNPM_STORE_DIR:-/tmp/pnpm-store}"
+export PNPM_STORE_DIR="${PNPM_STORE_DIR:-$DSH_HOME/pnpm-store}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/xdg-cache}"
 export COREPACK_HOME="${COREPACK_HOME:-/usr/local/share/corepack}"
 export COREPACK_ENABLE_DOWNLOAD_PROMPT="${COREPACK_ENABLE_DOWNLOAD_PROMPT:-0}"
@@ -112,10 +112,52 @@ done
 repair_patch_overlay "$DSH_HOME/profiles/web/cordis.patch.yml"
 repair_patch_overlay "$DSH_HOME/cordis.patch.yml"
 
-# A broken / half-installed profile bundle (EACCES during pnpm) leaves the
-# package listed in dsh.profile.bundles but unresolvable — loadProfile then
-# aborts. Drop such rows so the auth proxy can still boot; re-add via
-# `dsh plugin add` after permissions are fixed.
+# Names in dsh.profile.bundles that Node cannot resolve from the profile
+# directory (one per line). loadProfile aborts on these; we try to reinstall
+# npm packages first, then drop whatever is still missing.
+list_unresolvable_profile_bundles() {
+  PROFILE_DIR="$DSH_HOME/profiles/web" node --input-type=module <<'EOF'
+import { existsSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
+
+const dir = process.env.PROFILE_DIR
+if (dir === undefined || dir.length === 0) process.exit(0)
+const manifestPath = join(dir, 'package.json')
+if (!existsSync(manifestPath)) process.exit(0)
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+const bundles = manifest.dsh?.profile?.bundles
+if (!Array.isArray(bundles) || bundles.length === 0) process.exit(0)
+const requireFromProfile = createRequire(join(dir, 'package.json'))
+for (const name of bundles) {
+  if (typeof name !== 'string' || name.length === 0) continue
+  try {
+    requireFromProfile.resolve(`${name}/package.json`)
+  } catch {
+    process.stdout.write(`${name}\n`)
+  }
+}
+EOF
+}
+
+# Marketplace plugins live in the persisted profile, but their files often
+# vanish after a container recreate (/tmp pnpm store) or a Market restart that
+# killed PID 1 mid-install. Re-run `dsh plugin add` before dropping the row.
+while IFS= read -r pkg; do
+  [ -n "$pkg" ] || continue
+  case "$pkg" in
+    /*|./*|../*) continue ;;
+  esac
+  echo "dsh-auth: re-adding unresolvable profile bundle $pkg" >&2
+  if ! dsh plugin --profile web add "$pkg"; then
+    echo "dsh-auth: warning: could not re-add $pkg" >&2
+  fi
+done <<EOF
+$(list_unresolvable_profile_bundles)
+EOF
+
+# A still-broken bundle (EACCES, ERESOLVE, gone from npm) would abort
+# loadProfile. Drop it so /login stays up; re-add after the install is fixed.
 prune_unresolvable_profile_bundles() {
   PROFILE_DIR="$DSH_HOME/profiles/web" node --input-type=module <<'EOF'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -154,4 +196,7 @@ EOF
 
 prune_unresolvable_profile_bundles
 
-exec dsh --profile web "$@"
+# Docker has no useful default browser; --no-open is a CLI flag since the
+# version that prints "opening the default browser". The patch also sets
+# openBrowser: false in case a user overlay replaces the flag.
+exec dsh --profile web --no-open "$@"

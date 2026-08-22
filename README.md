@@ -16,21 +16,42 @@ docker compose up --build
 
 Open `http://localhost:3080`. The first boot creates `admin` from `DSH_AUTH_PASSWORD`. Later boots reuse `/data/auth/auth.sqlite` and ignore that password.
 
-Behind HTTPS (Caddy, nginx, Cloudflare), set `DSH_AUTH_BASE_URL` to that origin and `DSH_AUTH_SECURE_COOKIES=1`.
+Behind HTTPS (Caddy, nginx, Cloudflare, 极空间 reverse proxy), set `DSH_AUTH_BASE_URL` to that origin and `DSH_AUTH_SECURE_COOKIES=1`.
+
+## 极空间 / NAS
+
+Keep `PUID=0` (root) when `/data` is a NAS bind mount so `dsh plugin add` can rewrite pnpm's `0444` files. Map one persistent folder to `/data` (auth sqlite, settings, marketplace plugins, pnpm store). Do not map only `/tmp`.
+
+Set the public origin the browser actually uses:
+
+```
+DSH_AUTH_BASE_URL=https://dsh.example.com
+DSH_AUTH_SECURE_COOKIES=1
+```
+
+OpenViking Memory is a separate process. Inside this container, `http://127.0.0.1:1933` is not the NAS host. Point the plugin at the NAS LAN IP, `host-gateway`, or run OpenViking on the same Docker network.
+
+Plugin Market “restart” replaces PID 1 and the container exits; `restart: unless-stopped` brings it back. Re-add a dropped marketplace plugin after the share is healthy:
+
+```sh
+docker compose exec dsh dsh plugin --profile web add @openviking/dsh-memory-plugin
+```
+
+Settings → Models on the public hostname is official DSH loopback-only. On the NAS you can still put keys in the persisted `/data/.credentials.yaml` (mode `600`) and provider routes in `/data/settings.yaml`.
 
 ## Pull the published image
 
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.17
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.18
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.17
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.18
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -83,6 +104,8 @@ See [plugins/README.md](plugins/README.md) and [plugins/dsh-cursor-plugin/README
 - **Public-origin pairing heartbeat** — marketplace `dsh-remote-web-ui` treats `https://…` as LAN and `POST /api/pair/heartbeat` 401s `unpaired` when the browser has no `dsh_pair` cookie. A signed-in Better Auth session rewrites that unpaired body to `{"ok":true}`. A live pairing cookie still reaches upstream so phone/desktop presence stays accurate. QR pairing is unchanged.
 - **Public-origin `/remote` channel** — the same plugin rewrites desktop `/api` to `/remote/api` and shows “This device is not paired” without a pairing cookie. After Better Auth login, this proxy strips `/remote` and forwards `/api` (and `/sidebar`, `/git`, `/pet`) as loopback, so the public desktop does not need a second device-pair. Phone `/m/` QR pairing is unchanged.
 - **Plugin same-origin loopback** — after login, the proxy rewrites `Host` and `Origin` to `http://127.0.0.1:<internal>` and strips forwarding headers (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`, …). Plugin Market update/restart and other plugins that require Origin to match Host then see a local same-origin call. Better Auth remains the public gate. In Docker, a successful Market restart still replaces the `dsh` process; if that process is PID 1 the container exits.
+- **No in-container browser** — `dsh web` would otherwise try to open the host default browser. The image sets `openBrowser: false` and passes `--no-open`.
+- **SQLite ExperimentalWarning** — Better Auth uses Node's built-in `node:sqlite`. The warning is from Node, not a failed boot.
 
 ## Broken `cordis.patch.yml` after plugin install
 
@@ -101,7 +124,7 @@ Replace `dsh-auth-docker_dsh-data` with your compose volume name (`docker volume
 
 The container runs as **root** by default (`PUID=0`). That matches a single bind-mounted `/data` directory (for example a NAS share): root can rewrite pnpm's `0444` packages, so `dsh plugin add` no longer fails with EACCES. Set `PUID`/`PGID` only when you want to drop privileges; the entrypoint then chowns `/data` and `gosu`s to that user.
 
-Official DSH sandbox (bwrap / Landlock) mounts `/` read-only and only writes the session workspace and `/tmp`. npm/pnpm caches therefore point at `/tmp`, not `/root/.npm`. Recreate with `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` (compose already sets this) if logs stop at Corepack's Yes/No download prompt.
+Official DSH sandbox (bwrap / Landlock) mounts `/` read-only and only writes the session workspace and `/tmp`. Agent npm/xdg caches stay on `/tmp`. The pnpm store for `dsh plugin add` is `/data/pnpm-store` so a NAS container recreate does not turn marketplace plugins into unresolvable bundles. Recreate with `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` (compose already sets this) if logs stop at Corepack's Yes/No download prompt.
 
 `credentials-local` refuses to boot when `$DSH_HOME/.credentials.yaml` is group- or world-readable. The entrypoint sets that file to mode `600` on every boot. If a host chmod made it `666`, fix it on the host as well:
 
@@ -109,4 +132,8 @@ Official DSH sandbox (bwrap / Landlock) mounts `/` read-only and only writes the
 chmod 600 /path/to/dsh-data/.credentials.yaml
 ```
 
-Unresolvable rows in `dsh.profile.bundles` (half-installed plugins) are dropped on boot so `/login` can still come up; re-add them with `dsh plugin add`.
+Unresolvable rows in `dsh.profile.bundles` (half-installed plugins such as `@openviking/dsh-memory-plugin` after a container recreate) are re-added with `dsh plugin add` on boot. Whatever still cannot resolve is dropped so `/login` can come up. Re-add a dropped npm plugin after the host has network:
+
+```sh
+docker compose exec dsh dsh plugin --profile web add @openviking/dsh-memory-plugin
+```
