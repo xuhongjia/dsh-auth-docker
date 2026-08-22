@@ -33,12 +33,14 @@
           supportsReasoningEffort: true
           maxTokensField: max_tokens
         models:
-          - id: "auto"
+          - id: "default"
             name: "Cursor Auto"
           - id: "composer-2.5"
             name: "Composer 2.5"
           - id: "composer-2"
             name: "Composer 2"
+          - id: "auto-smart"
+            name: "Auto"
           - id: "claude-fable-5"
             name: "Claude Fable 5"
             contextWindow: 1000000

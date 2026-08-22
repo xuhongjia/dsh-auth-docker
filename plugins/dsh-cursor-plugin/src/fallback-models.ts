@@ -9,12 +9,17 @@ type ParamSpec = {
   fast?: boolean
 }
 
+type CatalogParameter = {
+  id: string
+  values: Array<{ value: string }>
+}
+
 function values(list: string[]): Array<{ value: string }> {
   return list.map((value) => ({ value }))
 }
 
-function parameters(spec: ParamSpec): NonNullable<CursorListItem['parameters']> {
-  const rows: NonNullable<CursorListItem['parameters']> = []
+function parameters(spec: ParamSpec): CatalogParameter[] {
+  const rows: CatalogParameter[] = []
   if (spec.optimizeFor === true) {
     rows.push({ id: 'optimize_for', values: values(['intelligence', 'balanced', 'cost']) })
   }
