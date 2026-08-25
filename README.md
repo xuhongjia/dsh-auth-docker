@@ -44,14 +44,14 @@ Settings → Models on the public hostname is official DSH loopback-only. On the
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.18
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.19
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.18
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.19
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
