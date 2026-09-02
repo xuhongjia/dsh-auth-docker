@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-为官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 Better Auth 登录。本仓库 **不是 fork**。Docker 从 npm 安装 `@deepseek-ai/dsh`，再对 `plugins/` 下每个 bundle 执行 `dsh plugin --profile web add`。
+为官方 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 Better Auth 登录。本仓库 **不是 fork**。Docker 从 npm 安装 `@deepseek-ai/dsh@0.1.2-alpha.4`（npm `alpha`；`latest` 仍是 `0.1.1-rc.2`），再对 `plugins/` 下每个 bundle 执行 `dsh plugin --profile web add`。可用 `--build-arg DSH_VERSION=…` 或 compose 的 `DSH_VERSION` 覆盖 CLI 版本。
 
 官方 Web 服务拒绝 `--host 0.0.0.0`，也没有认证 middleware。本插件监听 `0.0.0.0:3080`，提供 `/login` 与 `/auth`，并把已登录的 HTTP 和 WebSocket 反代到 `127.0.0.1` 上的官方 webserver。账号密码不会进入 DSH 的模型 RPC。
 
@@ -44,14 +44,14 @@ docker compose exec dsh dsh plugin --profile web add @openviking/dsh-memory-plug
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.19
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.20
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.19
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.20
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d
@@ -60,7 +60,7 @@ docker compose up -d
 ## 安装到已有的官方 dsh
 
 ```sh
-npm install -g @deepseek-ai/dsh
+npm install -g @deepseek-ai/dsh@0.1.2-alpha.4
 pnpm install && pnpm build
 export DSH_AUTH_PASSWORD='...'
 export DSH_AUTH_SECRET='...'   # 至少 32 个字符
@@ -85,13 +85,14 @@ dsh --profile web
 | `DSH_HOME` | Harness home（认证 sqlite、会话、设置）。Docker 使用 `/data` |
 | `PUID` / `PGID` | 容器内运行时 uid/gid，默认 `0`（root）。想降权就设成 `1000` 或宿主机用户，此时会先 chown `/data` |
 | `DSH_SKIP_CHOWN` | 降权时设为 `1` 则不 chown `/data` |
+| `DSH_VERSION` | 构建参数，官方 CLI 版本，默认 `0.1.2-alpha.4`。`docker compose build` / `--build-arg DSH_VERSION=` |
 
 ## 目录
 
 ```
 plugins/dsh-auth           Cordis bundle：Better Auth + 反向代理
 plugins/dsh-cursor-plugin  Cursor SDK 的 loopback OpenAI 网关（Settings → Models）
-Dockerfile                 npm i -g @deepseek-ai/dsh，然后对 plugins/* 逐个 dsh plugin add
+Dockerfile                 npm i -g @deepseek-ai/dsh@0.1.2-alpha.4，然后对 plugins/* 逐个 dsh plugin add
 ```
 
 见 [plugins/README.md](plugins/README.md) 与 [plugins/dsh-cursor-plugin/README.md](plugins/dsh-cursor-plugin/README.md)。已有 `$DSH_HOME/settings.yaml` 里的 `llm-pi-ai.providers`（例如 `opencode-go`）会和 Cursor 路由按 provider 名合并。
@@ -132,7 +133,11 @@ docker compose up -d
 chmod 600 /你的/dsh数据目录/.credentials.yaml
 ```
 
-`dsh.profile.bundles` 里无法 resolve 的半残插件（例如容器重建后 `@openviking/dsh-memory-plugin` 的文件丢了）会先尝试 `dsh plugin add` 重装。仍然 resolve 不到的才会被摘掉，保证 `/login` 能起来。网络正常后可手动重装被摘掉的 npm 插件：
+`dsh.profile.bundles` 里文件已经不在的半残插件会先 `dsh plugin add` 重装。解析方式和官方 DSH 一样：看目录里有没有 `package.json`，而不是 `require.resolve(包名/package.json)`。`exports` 里没声明 `./package.json` 的市场插件（包括 `@openviking/dsh-memory-plugin`）不会再被误摘。若上一版启动在文件还在时就把行删了，会从 `dependencies` 加回 bundles。仍然 resolve 不到的才会摘掉，保证 `/login` 能起来。
+
+官方 DSH 在会话目录是 Docker/NAS 卷、又不是 git 仓库时，可能打出 `fatal: not a git repository` 和 `GIT_DISCOVERY_ACROSS_FILESYSTEM`。这不影响 Web。需要 git 状态时打开一个 clone 下来的仓库即可。
+
+插件确实装丢了、主机有网络时再手动重装：
 
 ```sh
 docker compose exec dsh dsh plugin --profile web add @openviking/dsh-memory-plugin

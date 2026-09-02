@@ -1,7 +1,10 @@
 services:
   dsh:
-    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.19}
-    build: .
+    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.20}
+    build:
+      context: .
+      args:
+        DSH_VERSION: ${DSH_VERSION:-0.1.2-alpha.4}
     restart: unless-stopped
     ports:
       - "3080:3080"

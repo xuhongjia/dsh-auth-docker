@@ -14,8 +14,9 @@ RUN apt-get update \
   && corepack prepare pnpm@11.22.0 \
   && chmod -R a+rwX "$COREPACK_HOME"
 
-# Official Harness, not a fork. Default is npm latest; override at build time.
-ARG DSH_VERSION=latest
+# Official Harness, not a fork. npm `latest` is still 0.1.1-rc.2; pin the
+# published alpha CLI. Override at build time with --build-arg DSH_VERSION=…
+ARG DSH_VERSION=0.1.2-alpha.4
 RUN npm install -g "@deepseek-ai/dsh@${DSH_VERSION}"
 
 WORKDIR /opt
@@ -25,7 +26,7 @@ RUN pnpm install \
   && pnpm -r build \
   && pnpm prune --prod --ignore-scripts
 
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY docker-entrypoint.sh docker-profile-bundles.mjs /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
   && mkdir -p /home/node \
   && chown -R node:node /home/node /opt

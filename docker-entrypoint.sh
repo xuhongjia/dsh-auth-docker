@@ -112,32 +112,19 @@ done
 repair_patch_overlay "$DSH_HOME/profiles/web/cordis.patch.yml"
 repair_patch_overlay "$DSH_HOME/cordis.patch.yml"
 
-# Names in dsh.profile.bundles that Node cannot resolve from the profile
-# directory (one per line). loadProfile aborts on these; we try to reinstall
-# npm packages first, then drop whatever is still missing.
-list_unresolvable_profile_bundles() {
-  PROFILE_DIR="$DSH_HOME/profiles/web" node --input-type=module <<'EOF'
-import { existsSync, readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { join } from 'node:path'
-
-const dir = process.env.PROFILE_DIR
-if (dir === undefined || dir.length === 0) process.exit(0)
-const manifestPath = join(dir, 'package.json')
-if (!existsSync(manifestPath)) process.exit(0)
-const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-const bundles = manifest.dsh?.profile?.bundles
-if (!Array.isArray(bundles) || bundles.length === 0) process.exit(0)
-const requireFromProfile = createRequire(join(dir, 'package.json'))
-for (const name of bundles) {
-  if (typeof name !== 'string' || name.length === 0) continue
-  try {
-    requireFromProfile.resolve(`${name}/package.json`)
-  } catch {
-    process.stdout.write(`${name}\n`)
-  }
+# Official DSH resolves bundles by a directory that contains package.json, not
+# by require.resolve(`${name}/package.json`) (marketplace packages often omit
+# that subpath from "exports"). Restore rows a previous boot stripped while
+# the files were still on disk, reinstall what is genuinely missing, then
+# drop only names that still cannot resolve so loadProfile can boot /login.
+profile_bundles() {
+  PROFILE_DIR="$DSH_HOME/profiles/web" node /usr/local/bin/docker-profile-bundles.mjs "$1"
 }
-EOF
+
+profile_bundles restore
+
+list_unresolvable_profile_bundles() {
+  profile_bundles list
 }
 
 # Marketplace plugins live in the persisted profile, but their files often
@@ -156,45 +143,7 @@ done <<EOF
 $(list_unresolvable_profile_bundles)
 EOF
 
-# A still-broken bundle (EACCES, ERESOLVE, gone from npm) would abort
-# loadProfile. Drop it so /login stays up; re-add after the install is fixed.
-prune_unresolvable_profile_bundles() {
-  PROFILE_DIR="$DSH_HOME/profiles/web" node --input-type=module <<'EOF'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { join } from 'node:path'
-
-const dir = process.env.PROFILE_DIR
-if (dir === undefined || dir.length === 0) process.exit(0)
-const manifestPath = join(dir, 'package.json')
-if (!existsSync(manifestPath)) process.exit(0)
-const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-const bundles = manifest.dsh?.profile?.bundles
-if (!Array.isArray(bundles) || bundles.length === 0) process.exit(0)
-const requireFromProfile = createRequire(join(dir, 'package.json'))
-const kept = []
-const dropped = []
-for (const name of bundles) {
-  if (typeof name !== 'string' || name.length === 0) continue
-  try {
-    requireFromProfile.resolve(`${name}/package.json`)
-    kept.push(name)
-  } catch {
-    dropped.push(name)
-  }
-}
-if (dropped.length === 0) process.exit(0)
-manifest.dsh = manifest.dsh ?? {}
-manifest.dsh.profile = manifest.dsh.profile ?? {}
-manifest.dsh.profile.bundles = kept
-writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
-process.stderr.write(
-  `dsh-auth: dropped unresolvable profile bundles: ${dropped.join(', ')} (re-add with dsh plugin add)\n`,
-)
-EOF
-}
-
-prune_unresolvable_profile_bundles
+profile_bundles prune
 
 # Docker has no useful default browser; --no-open is a CLI flag since the
 # version that prints "opening the default browser". The patch also sets

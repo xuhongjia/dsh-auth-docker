@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Better Auth login for official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). This repository is **not a fork**. Docker installs `@deepseek-ai/dsh` from npm, then `dsh plugin --profile web add` every bundle under `plugins/`.
+Better Auth login for official [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). This repository is **not a fork**. Docker installs `@deepseek-ai/dsh@0.1.2-alpha.4` from npm (`alpha`; `latest` is still `0.1.1-rc.2`), then `dsh plugin --profile web add` every bundle under `plugins/`. Override the CLI with `--build-arg DSH_VERSION=…` or compose `DSH_VERSION`.
 
 The official Web server rejects `--host 0.0.0.0` and has no auth middleware. This plugin binds `0.0.0.0:3080`, serves `/login` and `/auth`, and proxies authenticated HTTP plus WebSocket traffic to the official webserver on `127.0.0.1`. Account passwords never enter DSH model RPC.
 
@@ -44,14 +44,14 @@ Settings → Models on the public hostname is official DSH loopback-only. On the
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.19
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.20
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.19
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.20
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -60,7 +60,7 @@ docker compose up -d
 ## Install into an existing official dsh
 
 ```sh
-npm install -g @deepseek-ai/dsh
+npm install -g @deepseek-ai/dsh@0.1.2-alpha.4
 pnpm install && pnpm build
 export DSH_AUTH_PASSWORD='...'
 export DSH_AUTH_SECRET='...'   # >= 32 characters
@@ -85,13 +85,14 @@ The public URL is printed as `dsh-auth: public http://0.0.0.0:3080 → 127.0.0.1
 | `DSH_HOME` | Harness home (auth sqlite, sessions, settings). Docker uses `/data` |
 | `PUID` / `PGID` | Runtime uid/gid inside the container, default `0` (root). Set `1000` or your host user to chown `/data` and drop privileges instead |
 | `DSH_SKIP_CHOWN` | Set `1` to skip the `/data` chown when dropping privileges |
+| `DSH_VERSION` | Build-arg for the official CLI; default `0.1.2-alpha.4`. `docker compose build` / `--build-arg DSH_VERSION=` |
 
 ## Layout
 
 ```
 plugins/dsh-auth           Cordis bundle: Better Auth + reverse proxy
 plugins/dsh-cursor-plugin  Loopback Cursor SDK OpenAI gateway (Settings → Models)
-Dockerfile                 npm i -g @deepseek-ai/dsh, then dsh plugin add each plugins/* folder
+Dockerfile                 npm i -g @deepseek-ai/dsh@0.1.2-alpha.4, then dsh plugin add each plugins/* folder
 ```
 
 See [plugins/README.md](plugins/README.md) and [plugins/dsh-cursor-plugin/README.md](plugins/dsh-cursor-plugin/README.md). Existing `$DSH_HOME/settings.yaml` `llm-pi-ai.providers` (for example `opencode-go`) merge per provider with the Cursor route.
@@ -132,7 +133,11 @@ Official DSH sandbox (bwrap / Landlock) mounts `/` read-only and only writes the
 chmod 600 /path/to/dsh-data/.credentials.yaml
 ```
 
-Unresolvable rows in `dsh.profile.bundles` (half-installed plugins such as `@openviking/dsh-memory-plugin` after a container recreate) are re-added with `dsh plugin add` on boot. Whatever still cannot resolve is dropped so `/login` can come up. Re-add a dropped npm plugin after the host has network:
+Unresolvable rows in `dsh.profile.bundles` (files gone after a container recreate) are re-added with `dsh plugin add` on boot. Resolution matches official DSH: a directory that contains `package.json`, not `require.resolve(name/package.json)`. Packages that omit `./package.json` from `"exports"` (including `@openviking/dsh-memory-plugin`) stay installed. A previous boot that stripped such a row while the files were still on disk is restored from `dependencies`. Whatever still cannot resolve is dropped so `/login` can come up.
+
+Official DSH may log `fatal: not a git repository` and `GIT_DISCOVERY_ACROSS_FILESYSTEM` when the session workspace is a Docker/NAS volume that is not a git checkout. That does not stop Web. Open a cloned repo if you want git status.
+
+If a plugin is genuinely missing after the host has network:
 
 ```sh
 docker compose exec dsh dsh plugin --profile web add @openviking/dsh-memory-plugin
