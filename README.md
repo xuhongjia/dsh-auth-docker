@@ -44,14 +44,14 @@ Settings → Models on the public hostname is official DSH loopback-only. On the
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.20
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.21
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.20
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.21
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -107,6 +107,7 @@ See [plugins/README.md](plugins/README.md) and [plugins/dsh-cursor-plugin/README
 - **Plugin same-origin loopback** — after login, the proxy rewrites `Host` and `Origin` to `http://127.0.0.1:<internal>` and strips forwarding headers (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`, …). Plugin Market update/restart and other plugins that require Origin to match Host then see a local same-origin call. Better Auth remains the public gate. In Docker, a successful Market restart still replaces the `dsh` process; if that process is PID 1 the container exits.
 - **No in-container browser** — `dsh web` would otherwise try to open the host default browser. The image sets `openBrowser: false` and passes `--no-open`.
 - **SQLite ExperimentalWarning** — Better Auth uses Node's built-in `node:sqlite`. The warning is from Node, not a failed boot.
+- **Marketplace plugins vs dsh 0.1.2** — `@deepseek-ai/dsh-settings` 0.1.2 removed `installSettingsSection` and `settingsNamespace`. Older `dshmarket`, `dsh-better-sidebar`, `@linxin666/dsh-web-ui-all@0.3.6`, and `@linxin666/dsh-doctor` then fail to import (`does not provide an export named …`). This image puts those two helpers back on every `dsh-settings` copy at build and boot. Prefer migrating `@linxin666/dsh-web-ui-all` to `@linxin666/dsh-web-all` (0.3.12+) when you can; `dshmarket@1.40.0` already inlined the helpers.
 
 ## Broken `cordis.patch.yml` after plugin install
 

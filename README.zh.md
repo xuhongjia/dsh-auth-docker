@@ -44,14 +44,14 @@ docker compose exec dsh dsh plugin --profile web add @openviking/dsh-memory-plug
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.20
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.21
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.20
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.21
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d
@@ -107,6 +107,7 @@ Dockerfile                 npm i -g @deepseek-ai/dsh@0.1.2-alpha.4，然后对 p
 - **插件同源 loopback** —— 登录后代理会把 `Host` 和 `Origin` 改写成 `http://127.0.0.1:<内部端口>`，并去掉转发头（`X-Forwarded-For`、`Forwarded`、`X-Real-IP` 等）。Plugin Market 的更新/重启，以及其它要求 Origin 必须等于 Host 的插件，就会看成是本机同源请求。Better Auth 仍是公网门禁。在 Docker 里，Market 重启成功后仍会替换当前 `dsh` 进程；如果它是 PID 1，容器会退出。
 - **容器里不开浏览器** —— 官方 `dsh web` 默认会调系统浏览器。镜像里关掉了 `openBrowser`，并带 `--no-open`。
 - **SQLite ExperimentalWarning** —— Better Auth 用的是 Node 内置 `node:sqlite`。这是 Node 的实验提示，不是启动失败。
+- **市场插件 vs dsh 0.1.2** —— `@deepseek-ai/dsh-settings` 0.1.2 删掉了 `installSettingsSection` 和 `settingsNamespace`。旧的 `dshmarket`、`dsh-better-sidebar`、`@linxin666/dsh-web-ui-all@0.3.6`、`@linxin666/dsh-doctor` 会报 `does not provide an export named …`。本镜像会在构建和每次启动时把这两个 helper 补回每一份 `dsh-settings`。有空请把 `@linxin666/dsh-web-ui-all` 迁到 `@linxin666/dsh-web-all`（0.3.12+）；`dshmarket@1.40.0` 已经内联了这两项。
 
 ## 在线装插件后 `cordis.patch.yml` 损坏
 

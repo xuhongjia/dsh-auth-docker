@@ -145,6 +145,12 @@ EOF
 
 profile_bundles prune
 
+# dsh 0.1.2-alpha.1 deleted named exports that persisted marketplace plugins
+# still static-import. Patch every copy (image + /data profile) before boot.
+node /usr/local/bin/docker-dsh-settings-compat.mjs \
+  /usr/local/lib/node_modules \
+  "$DSH_HOME/profiles/web/node_modules" || true
+
 # Docker has no useful default browser; --no-open is a CLI flag since the
 # version that prints "opening the default browser". The patch also sets
 # openBrowser: false in case a user overlay replaces the flag.

@@ -1,6 +1,6 @@
 {
   "name": "dsh-auth",
-  "version": "0.0.20",
+  "version": "0.0.21",
   "description": "Better Auth reverse-proxy bundle for official DeepSeek Harness Web",
   "type": "module",
   "main": "lib/index.js",
