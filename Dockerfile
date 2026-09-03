@@ -26,7 +26,7 @@ RUN pnpm install \
   && pnpm -r build \
   && pnpm prune --prod --ignore-scripts
 
-COPY docker-entrypoint.sh docker-profile-bundles.mjs docker-dsh-settings-compat.mjs /usr/local/bin/
+COPY docker-entrypoint.sh docker-profile-bundles.mjs docker-dsh-settings-compat.mjs docker-session-projcache.mjs /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
   && node /usr/local/bin/docker-dsh-settings-compat.mjs /usr/local/lib/node_modules \
   && mkdir -p /home/node \

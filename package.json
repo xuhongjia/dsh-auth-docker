@@ -4,7 +4,7 @@
   "description": "Docker workspace: Better Auth and extra DeepSeek Harness bundles",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test && node --test docker-profile-bundles.test.mjs docker-dsh-settings-compat.test.mjs"
+    "test": "pnpm -r test && node --test docker-profile-bundles.test.mjs docker-dsh-settings-compat.test.mjs docker-session-projcache.test.mjs"
   },
   "engines": {
     "node": "^22.19 || >=24"

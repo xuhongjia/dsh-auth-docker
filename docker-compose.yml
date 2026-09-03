@@ -1,6 +1,6 @@
 services:
   dsh:
-    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.21}
+    image: ${DSH_IMAGE:-ghcr.io/xuhongjia/dsh-auth-docker:0.0.22}
     build:
       context: .
       args:

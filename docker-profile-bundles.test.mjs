@@ -5,9 +5,11 @@ import { join } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  DSH_HOST_APIPROXY,
   listUnresolvableProfileBundles,
   packageDirFromProfile,
   pruneUnresolvableProfileBundles,
+  quarantineBundlesImportingSpecifier,
   restoreDependencyProfileBundles,
 } from './docker-profile-bundles.mjs'
 
@@ -105,5 +107,84 @@ describe('pruneUnresolvableProfileBundles', () => {
     assert.deepEqual(pruneUnresolvableProfileBundles(dir), [PACKAGE])
     const manifest = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
     assert.deepEqual(manifest.dsh.profile.bundles, [])
+  })
+})
+
+const REMOTE_WEB_UI = '@linxin666/dsh-remote-web-ui'
+const WEB_UI_ALL = '@linxin666/dsh-web-ui-all'
+
+async function profileWithRemoteWebUi(options = {}) {
+  root = await mkdtemp(join(tmpdir(), 'dsh-profile-apiproxy-'))
+  const remoteDir = join(root, 'node_modules', '@linxin666', 'dsh-remote-web-ui')
+  await mkdir(remoteDir, { recursive: true })
+  await writeJson(join(remoteDir, 'package.json'), {
+    name: REMOTE_WEB_UI,
+    type: 'module',
+    exports: { '.': './lib/index.js' },
+    dsh: { bundle: { patch: './cordis.patch.yml' } },
+  })
+  const importLine = options.importApiProxy
+    ? `import '${DSH_HOST_APIPROXY}'\n`
+    : "import '@deepseek-ai/cordis'\n"
+  await mkdir(join(remoteDir, 'lib'), { recursive: true })
+  await writeFile(join(remoteDir, 'lib', 'index.js'), `${importLine}export {}\n`)
+  await writeFile(join(remoteDir, 'cordis.patch.yml'), '[]\n')
+
+  const bundles = options.withParent ? [WEB_UI_ALL, REMOTE_WEB_UI] : [REMOTE_WEB_UI]
+  const dependencies = { [REMOTE_WEB_UI]: '0.3.6' }
+  if (options.withParent) {
+    const parentDir = join(root, 'node_modules', '@linxin666', 'dsh-web-ui-all')
+    await mkdir(parentDir, { recursive: true })
+    await writeJson(join(parentDir, 'package.json'), {
+      name: WEB_UI_ALL,
+      type: 'module',
+      exports: { '.': './index.mjs' },
+      dependencies: { [REMOTE_WEB_UI]: '0.3.6' },
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    })
+    await writeFile(join(parentDir, 'index.mjs'), 'export {}\n')
+    await writeFile(join(parentDir, 'cordis.patch.yml'), `- name: ${REMOTE_WEB_UI}\n`)
+    dependencies[WEB_UI_ALL] = '0.3.6'
+  }
+  if (options.installApiProxy) {
+    const proxyDir = join(root, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy')
+    await mkdir(proxyDir, { recursive: true })
+    await writeJson(join(proxyDir, 'package.json'), { name: DSH_HOST_APIPROXY, type: 'module' })
+  }
+  await writeJson(join(root, 'package.json'), {
+    name: 'dsh-profile-web',
+    private: true,
+    dependencies,
+    dsh: { profile: { bundles } },
+  })
+  return root
+}
+
+describe('quarantineBundlesImportingSpecifier', () => {
+  it('drops remote-web-ui when its entry still imports missing dsh-host-apiproxy', async () => {
+    const dir = await profileWithRemoteWebUi({ importApiProxy: true })
+    assert.deepEqual(quarantineBundlesImportingSpecifier(dir, DSH_HOST_APIPROXY), [REMOTE_WEB_UI])
+    const manifest = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
+    assert.deepEqual(manifest.dsh.profile.bundles, [])
+  })
+
+  it('drops the deprecated web-ui-all parent that nests the old remote-web-ui', async () => {
+    const dir = await profileWithRemoteWebUi({ importApiProxy: true, withParent: true })
+    const dropped = quarantineBundlesImportingSpecifier(dir, DSH_HOST_APIPROXY)
+    assert.deepEqual(dropped.sort(), [REMOTE_WEB_UI, WEB_UI_ALL].sort())
+    const manifest = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
+    assert.deepEqual(manifest.dsh.profile.bundles, [])
+  })
+
+  it('keeps a remote-web-ui that no longer imports the missing package', async () => {
+    const dir = await profileWithRemoteWebUi({ importApiProxy: false })
+    assert.deepEqual(quarantineBundlesImportingSpecifier(dir, DSH_HOST_APIPROXY), [])
+    const manifest = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
+    assert.deepEqual(manifest.dsh.profile.bundles, [REMOTE_WEB_UI])
+  })
+
+  it('keeps the bundle when dsh-host-apiproxy is actually installed', async () => {
+    const dir = await profileWithRemoteWebUi({ importApiProxy: true, installApiProxy: true })
+    assert.deepEqual(quarantineBundlesImportingSpecifier(dir, DSH_HOST_APIPROXY), [])
   })
 })

@@ -130,10 +130,17 @@ list_unresolvable_profile_bundles() {
 # Marketplace plugins live in the persisted profile, but their files often
 # vanish after a container recreate (/tmp pnpm store) or a Market restart that
 # killed PID 1 mid-install. Re-run `dsh plugin add` before dropping the row.
+# Never re-fetch deprecated @linxin666/dsh-web-ui-all (last publish 0.3.6):
+# pnpm then warns and can abort with "Invalid array length"; the successor is
+# @linxin666/dsh-web-all. prune + quarantine drop the old layer.
 while IFS= read -r pkg; do
   [ -n "$pkg" ] || continue
   case "$pkg" in
     /*|./*|../*) continue ;;
+    @linxin666/dsh-web-ui-all)
+      echo "dsh-auth: skipping re-add of deprecated $pkg (use @linxin666/dsh-web-all)" >&2
+      continue
+      ;;
   esac
   echo "dsh-auth: re-adding unresolvable profile bundle $pkg" >&2
   if ! dsh plugin --profile web add "$pkg"; then
@@ -145,11 +152,23 @@ EOF
 
 profile_bundles prune
 
+# dsh 0.1.2 dropped @deepseek-ai/dsh-host-apiproxy. Marketplace
+# @linxin666/dsh-remote-web-ui@0.3.6 (and dsh-web-ui-all that nests it) still
+# imports it; that ERR_MODULE_NOT_FOUND joins the fatal Include AggregateError.
+# 0.3.12 does not import it. Drop the old layer until the user upgrades.
+profile_bundles quarantine
+
 # dsh 0.1.2-alpha.1 deleted named exports that persisted marketplace plugins
 # still static-import. Patch every copy (image + /data profile) before boot.
 node /usr/local/bin/docker-dsh-settings-compat.mjs \
   /usr/local/lib/node_modules \
   "$DSH_HOME/profiles/web/node_modules" || true
+
+# Projection cache is derived; sessions/*.jsonl is the authority. DSH 0.1.2
+# bootstrap copies old session_projcache.json records without migrating
+# identity.isSeeded / inheritedEventCount, then Zod aborts the plugin tree.
+# https://github.com/deepseek-ai/deepseek-harness/discussions/5396
+node /usr/local/bin/docker-session-projcache.mjs
 
 # Docker has no useful default browser; --no-open is a CLI flag since the
 # version that prints "opening the default browser". The patch also sets
