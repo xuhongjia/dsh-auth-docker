@@ -44,14 +44,14 @@ docker compose exec dsh dsh plugin --profile web add @openviking/dsh-memory-plug
 推送到 `main` 后，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 并发布到 GitHub Container Registry：
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.22
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.23
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 第一次 workflow 成功后，到 GitHub → Packages 把包可见性改为 Public，然后：
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.22
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.23
 # 或使用上面同一份 .env：
 docker compose pull
 docker compose up -d
@@ -107,9 +107,10 @@ Dockerfile                 npm i -g @deepseek-ai/dsh@0.1.2-alpha.4，然后对 p
 - **插件同源 loopback** —— 登录后代理会把 `Host` 和 `Origin` 改写成 `http://127.0.0.1:<内部端口>`，并去掉转发头（`X-Forwarded-For`、`Forwarded`、`X-Real-IP` 等）。Plugin Market 的更新/重启，以及其它要求 Origin 必须等于 Host 的插件，就会看成是本机同源请求。Better Auth 仍是公网门禁。在 Docker 里，Market 重启成功后仍会替换当前 `dsh` 进程；如果它是 PID 1，容器会退出。
 - **容器里不开浏览器** —— 官方 `dsh web` 默认会调系统浏览器。镜像里关掉了 `openBrowser`，并带 `--no-open`。
 - **SQLite ExperimentalWarning** —— Better Auth 用的是 Node 内置 `node:sqlite`。这是 Node 的实验提示，不是启动失败。
-- **市场插件 vs dsh 0.1.2** —— `@deepseek-ai/dsh-settings` 0.1.2 删掉了 `installSettingsSection` 和 `settingsNamespace`。旧的 `dshmarket`、`dsh-better-sidebar`、`@linxin666/dsh-web-ui-all@0.3.6`、`@linxin666/dsh-doctor` 会报 `does not provide an export named …`。本镜像会在构建和每次启动时把这两个 helper 补回每一份 `dsh-settings`。有空请把 `@linxin666/dsh-web-ui-all` 迁到 `@linxin666/dsh-web-all`（0.3.12+）；`dshmarket@1.40.0` 已经内联了这两项。
-- **旧 `dsh-remote-web-ui` 找不到 `dsh-host-apiproxy`** —— `@linxin666/dsh-remote-web-ui@0.3.6`（以及嵌套它的已弃用 `@linxin666/dsh-web-ui-all`）仍会 import `@deepseek-ai/dsh-host-apiproxy`，0.1.2 CLI 已不再带这个包。`ERR_MODULE_NOT_FOUND` 会进同一组致命的 Include `AggregateError`。启动时会先摘掉这些 profile 层，直到你执行 `dsh plugin add @linxin666/dsh-web-all`（内含不 import 该包的 `dsh-remote-web-ui@0.3.12`）。配对功能需要新包装。
-- **升到 0.1.2 后的 session 投影缓存** —— 沿用旧 `/data` 可能报 `domain 'session_projcache' … identity.isSeeded` / `inheritedEventCount`。投影缓存是派生数据，真正的对话在 `$DSH_HOME/sessions/*.jsonl`。本镜像启动时会把过期的 `storages/session_projcache.json` 和 `storages/session_projcache/` 改名为 `.bak-dsh-auth-*`。不要删 `/data/sessions`，也不要删 `storages/workspace.json`（工作区注册表）。旧镜像可先把这两个缓存路径挪开再重建容器。见[上游讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/5396)。
+- **启动日志里的 `Invalid array length`** —— 来自 pnpm，不是 DSH。入口会对 `/opt/plugins/*` 跑 `dsh plugin add`；Docker 日志不是 TTY，pnpm 进度条（`Progress: resolved 1…` 加 ANSI 光标上移）会抛 `RangeError: Invalid array length`。入口仍会继续 `dsh`（`starting dsh anyway`）。当前入口已加 `--reporter=append-only`。旧镜像只要 `/login` 能开就可以忽略。
+- **市场插件 vs dsh 0.1.2** —— `@deepseek-ai/dsh-settings` 0.1.2 删掉了 `installSettingsSection` 和 `settingsNamespace`。旧的 `dshmarket`、`dsh-better-sidebar`、`@linxin666/dsh-web-ui-all@0.3.6`、`@linxin666/dsh-doctor` 会报 `does not provide an export named …`。**构建镜像时**仍会补 CLI 那一份 `dsh-settings`。持久化市场插件若再报缺导出，在容器里跑下面的修复命令。有空请把 `@linxin666/dsh-web-ui-all` 迁到 `@linxin666/dsh-web-all`（0.3.12+）；`dshmarket@1.40.0` 已经内联了这两项。
+- **旧 `dsh-remote-web-ui` 找不到 `dsh-host-apiproxy`** —— `@linxin666/dsh-remote-web-ui@0.3.6`（以及嵌套它的已弃用 `@linxin666/dsh-web-ui-all`）仍会 import `@deepseek-ai/dsh-host-apiproxy`，0.1.2 CLI 已不再带这个包。`ERR_MODULE_NOT_FOUND` 会进同一组致命的 Include `AggregateError`。用下面的 profile-bundle 命令摘掉这些层，再 `dsh plugin add @linxin666/dsh-web-all`（内含 `dsh-remote-web-ui@0.3.12`）。配对功能需要新包装。
+- **升到 0.1.2 后的 session 投影缓存** —— 沿用旧 `/data` 可能报 `domain 'session_projcache' … identity.isSeeded` / `inheritedEventCount`。投影缓存是派生数据，真正的对话在 `$DSH_HOME/sessions/*.jsonl`。不要删 `/data/sessions`，也不要删 `storages/workspace.json`。在容器里跑 `docker-session-projcache.mjs`（见下）。见[上游讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/5396)。
 
 ## 在线装插件后 `cordis.patch.yml` 损坏
 
@@ -136,7 +137,26 @@ docker compose up -d
 chmod 600 /你的/dsh数据目录/.credentials.yaml
 ```
 
-`dsh.profile.bundles` 里文件已经不在的半残插件会先 `dsh plugin add` 重装。解析方式和官方 DSH 一样：看目录里有没有 `package.json`，而不是 `require.resolve(包名/package.json)`。`exports` 里没声明 `./package.json` 的市场插件（包括 `@openviking/dsh-memory-plugin`）不会再被误摘。若上一版启动在文件还在时就把行删了，会从 `dependencies` 加回 bundles。仍然 resolve 不到的才会摘掉，保证 `/login` 能起来。仍在 import 已缺失的 `@deepseek-ai/dsh-host-apiproxy` 的层也会同样摘掉。
+半残市场插件 **不会** 每次启动自动修。`/login` 起不来、或 0.1.2 schema 报错时，在容器里跑这些命令再重建：
+
+```sh
+# 市场插件层：从 dependencies 加回、列出丢失、摘掉、隔离旧 dsh-host-apiproxy
+docker compose exec dsh sh -c 'PROFILE_DIR=/data/profiles/web node /usr/local/bin/docker-profile-bundles.mjs restore'
+docker compose exec dsh sh -c 'PROFILE_DIR=/data/profiles/web node /usr/local/bin/docker-profile-bundles.mjs list'
+docker compose exec dsh sh -c 'PROFILE_DIR=/data/profiles/web node /usr/local/bin/docker-profile-bundles.mjs prune'
+docker compose exec dsh sh -c 'PROFILE_DIR=/data/profiles/web node /usr/local/bin/docker-profile-bundles.mjs quarantine'
+
+# 给持久化的 dsh-settings 补回 installSettingsSection
+docker compose exec dsh node /usr/local/bin/docker-dsh-settings-compat.mjs \
+  /usr/local/lib/node_modules /data/profiles/web/node_modules
+
+# 挪走过期 session_projcache（保留 sessions/*.jsonl）
+docker compose exec dsh sh -c 'DSH_HOME=/data node /usr/local/bin/docker-session-projcache.mjs'
+
+docker compose up -d --force-recreate
+```
+
+解析方式和官方 DSH 一样：看目录里有没有 `package.json`，而不是 `require.resolve(包名/package.json)`。`exports` 里没声明 `./package.json` 的市场插件（包括 `@openviking/dsh-memory-plugin`）在 `restore` 再 `prune` 后会留下。
 
 官方 DSH 在会话目录是 Docker/NAS 卷、又不是 git 仓库时，可能打出 `fatal: not a git repository` 和 `GIT_DISCOVERY_ACROSS_FILESYSTEM`。这不影响 Web。需要 git 状态时打开一个 clone 下来的仓库即可。
 

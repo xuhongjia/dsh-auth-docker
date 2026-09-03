@@ -44,14 +44,14 @@ Settings → Models on the public hostname is official DSH loopback-only. On the
 Pushes to `main` build and publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry:
 
 ```text
-ghcr.io/xuhongjia/dsh-auth-docker:0.0.22
+ghcr.io/xuhongjia/dsh-auth-docker:0.0.23
 ghcr.io/xuhongjia/dsh-auth-docker:latest
 ```
 
 After the first successful workflow run, set the package visibility to Public under GitHub → Packages. Then:
 
 ```sh
-docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.22
+docker pull ghcr.io/xuhongjia/dsh-auth-docker:0.0.23
 # or, with the same .env as above:
 docker compose pull
 docker compose up -d
@@ -107,9 +107,10 @@ See [plugins/README.md](plugins/README.md) and [plugins/dsh-cursor-plugin/README
 - **Plugin same-origin loopback** — after login, the proxy rewrites `Host` and `Origin` to `http://127.0.0.1:<internal>` and strips forwarding headers (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`, …). Plugin Market update/restart and other plugins that require Origin to match Host then see a local same-origin call. Better Auth remains the public gate. In Docker, a successful Market restart still replaces the `dsh` process; if that process is PID 1 the container exits.
 - **No in-container browser** — `dsh web` would otherwise try to open the host default browser. The image sets `openBrowser: false` and passes `--no-open`.
 - **SQLite ExperimentalWarning** — Better Auth uses Node's built-in `node:sqlite`. The warning is from Node, not a failed boot.
-- **Marketplace plugins vs dsh 0.1.2** — `@deepseek-ai/dsh-settings` 0.1.2 removed `installSettingsSection` and `settingsNamespace`. Older `dshmarket`, `dsh-better-sidebar`, `@linxin666/dsh-web-ui-all@0.3.6`, and `@linxin666/dsh-doctor` then fail to import (`does not provide an export named …`). This image puts those two helpers back on every `dsh-settings` copy at build and boot. Prefer migrating `@linxin666/dsh-web-ui-all` to `@linxin666/dsh-web-all` (0.3.12+) when you can; `dshmarket@1.40.0` already inlined the helpers.
-- **Old `dsh-remote-web-ui` vs missing `dsh-host-apiproxy`** — `@linxin666/dsh-remote-web-ui@0.3.6` (and deprecated `@linxin666/dsh-web-ui-all` that nests it) still imports `@deepseek-ai/dsh-host-apiproxy`, which 0.1.2 no longer ships. That `ERR_MODULE_NOT_FOUND` is included in the same fatal Include `AggregateError`. Boot drops those profile layers until you `dsh plugin add @linxin666/dsh-web-all` (ships `dsh-remote-web-ui@0.3.12`, which does not import it). Pairing then needs the new pack.
-- **Session projection cache after 0.1.2** — upgrading a persisted `/data` can abort with `domain 'session_projcache' … identity.isSeeded` / `inheritedEventCount`. The cache is derived; `$DSH_HOME/sessions/*.jsonl` is the chat log. This image renames stale `storages/session_projcache.json` and `storages/session_projcache/` to `.bak-dsh-auth-*` on boot. Do not delete `/data/sessions` or `storages/workspace.json` (workspace registry). On an older image, move those two cache paths aside and recreate the container. See [upstream discussion](https://github.com/deepseek-ai/deepseek-harness/discussions/5396).
+- **`Invalid array length` during boot** — pnpm, not DSH. The entrypoint runs `dsh plugin add` for `/opt/plugins/*`; Docker logs are not a TTY, so pnpm's progress bar (`Progress: resolved 1…` plus ANSI cursor-up) throws `RangeError: Invalid array length`. The entrypoint still starts `dsh` (`starting dsh anyway`). Current entrypoint passes `--reporter=append-only`. Ignore on an older image if `/login` is up.
+- **Marketplace plugins vs dsh 0.1.2** — `@deepseek-ai/dsh-settings` 0.1.2 removed `installSettingsSection` and `settingsNamespace`. Older `dshmarket`, `dsh-better-sidebar`, `@linxin666/dsh-web-ui-all@0.3.6`, and `@linxin666/dsh-doctor` then fail to import (`does not provide an export named …`). Image **build** still patches the CLI copy of `dsh-settings`. If a persisted marketplace plugin fails after that, run the repair helpers below. Prefer migrating `@linxin666/dsh-web-ui-all` to `@linxin666/dsh-web-all` (0.3.12+) when you can; `dshmarket@1.40.0` already inlined the helpers.
+- **Old `dsh-remote-web-ui` vs missing `dsh-host-apiproxy`** — `@linxin666/dsh-remote-web-ui@0.3.6` (and deprecated `@linxin666/dsh-web-ui-all` that nests it) still imports `@deepseek-ai/dsh-host-apiproxy`, which 0.1.2 no longer ships. That `ERR_MODULE_NOT_FOUND` is included in the same fatal Include `AggregateError`. Drop those layers with the profile-bundle helper below, then `dsh plugin add @linxin666/dsh-web-all` (ships `dsh-remote-web-ui@0.3.12`). Pairing then needs the new pack.
+- **Session projection cache after 0.1.2** — upgrading a persisted `/data` can abort with `domain 'session_projcache' … identity.isSeeded` / `inheritedEventCount`. The cache is derived; `$DSH_HOME/sessions/*.jsonl` is the chat log. Do not delete `/data/sessions` or `storages/workspace.json`. Run `docker-session-projcache.mjs` inside the container (below). See [upstream discussion](https://github.com/deepseek-ai/deepseek-harness/discussions/5396).
 
 ## Broken `cordis.patch.yml` after plugin install
 
@@ -136,7 +137,26 @@ Official DSH sandbox (bwrap / Landlock) mounts `/` read-only and only writes the
 chmod 600 /path/to/dsh-data/.credentials.yaml
 ```
 
-Unresolvable rows in `dsh.profile.bundles` (files gone after a container recreate) are re-added with `dsh plugin add` on boot. Resolution matches official DSH: a directory that contains `package.json`, not `require.resolve(name/package.json)`. Packages that omit `./package.json` from `"exports"` (including `@openviking/dsh-memory-plugin`) stay installed. A previous boot that stripped such a row while the files were still on disk is restored from `dependencies`. Whatever still cannot resolve is dropped so `/login` can come up. Layers that still import missing `@deepseek-ai/dsh-host-apiproxy` are dropped the same way.
+Unresolvable marketplace bundles are **not** repaired on every boot. If `/login` is down after a recreate or a 0.1.2 schema error, run the helpers inside the container, then recreate:
+
+```sh
+# marketplace rows: restore from dependencies, list missing, prune, drop old dsh-host-apiproxy imports
+docker compose exec dsh sh -c 'PROFILE_DIR=/data/profiles/web node /usr/local/bin/docker-profile-bundles.mjs restore'
+docker compose exec dsh sh -c 'PROFILE_DIR=/data/profiles/web node /usr/local/bin/docker-profile-bundles.mjs list'
+docker compose exec dsh sh -c 'PROFILE_DIR=/data/profiles/web node /usr/local/bin/docker-profile-bundles.mjs prune'
+docker compose exec dsh sh -c 'PROFILE_DIR=/data/profiles/web node /usr/local/bin/docker-profile-bundles.mjs quarantine'
+
+# restore installSettingsSection on persisted dsh-settings copies
+docker compose exec dsh node /usr/local/bin/docker-dsh-settings-compat.mjs \
+  /usr/local/lib/node_modules /data/profiles/web/node_modules
+
+# move a stale session_projcache (keeps sessions/*.jsonl)
+docker compose exec dsh sh -c 'DSH_HOME=/data node /usr/local/bin/docker-session-projcache.mjs'
+
+docker compose up -d --force-recreate
+```
+
+Resolution matches official DSH: a directory that contains `package.json`, not `require.resolve(name/package.json)`. Packages that omit `./package.json` from `"exports"` (including `@openviking/dsh-memory-plugin`) stay installed when you `restore` then `prune`.
 
 Official DSH may log `fatal: not a git repository` and `GIT_DISCOVERY_ACROSS_FILESYSTEM` when the session workspace is a Docker/NAS volume that is not a git checkout. That does not stop Web. Open a cloned repo if you want git status.
 

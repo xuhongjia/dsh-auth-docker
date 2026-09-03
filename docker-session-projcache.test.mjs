@@ -92,13 +92,38 @@ describe('resetStaleSessionProjcache', () => {
     assert.equal(names.includes('session_projcache'), false)
   })
 
-  it('does not move a cache whose identity already matches 0.1.2', async () => {
+  it('does not move a cache whose identity already matches 0.1.2 when force-once is off', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-projcache-'))
     const { cacheDir } = sessionProjcachePaths(root)
     await mkdir(join(cacheDir, 'sessions'), { recursive: true })
     await writeJson(join(cacheDir, 'sessions', 'ok.json'), freshRecord('ok'))
-    assert.deepEqual(resetStaleSessionProjcache(root), [])
+    assert.deepEqual(resetStaleSessionProjcache(root, { forceOnce: false }), [])
     assert.equal(sessionProjcacheLooksStale(root), false)
     JSON.parse(await readFile(join(cacheDir, 'sessions', 'ok.json'), 'utf8'))
+  })
+
+  it('force-moves an existing cache once when the identity-v5 marker is missing', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-projcache-'))
+    const { cacheDir, marker, storages } = sessionProjcachePaths(root)
+    await mkdir(join(cacheDir, 'sessions'), { recursive: true })
+    await writeJson(join(cacheDir, 'sessions', 'ok.json'), freshRecord('ok'))
+    const moved = resetStaleSessionProjcache(root)
+    assert.equal(moved.length, 1)
+    assert.equal(await readFile(marker, 'utf8'), 'identity-v5\n')
+    const backups = (await readdir(storages)).filter((name) => name.startsWith('session_projcache.bak-dsh-auth-'))
+    assert.equal(backups.length, 1)
+    assert.deepEqual(resetStaleSessionProjcache(root), [])
+  })
+
+  it('does not force-move a fresh cache after the marker exists', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-projcache-'))
+    const { cacheDir, marker, storages } = sessionProjcachePaths(root)
+    await mkdir(join(cacheDir, 'sessions'), { recursive: true })
+    await writeJson(join(cacheDir, 'sessions', 'ok.json'), freshRecord('ok'))
+    await writeFile(marker, 'identity-v5\n')
+    assert.deepEqual(resetStaleSessionProjcache(root), [])
+    const names = await readdir(storages)
+    assert.equal(names.includes('session_projcache'), true)
+    assert.equal(names.some((name) => name.startsWith('session_projcache.bak-dsh-auth-')), false)
   })
 })

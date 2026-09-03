@@ -7,12 +7,27 @@
  * domain version, and does not migrate those fields. Zod then aborts the
  * whole plugin tree. The cache is derived; `$DSH_HOME/sessions/*.jsonl` is
  * the authority. Never touch sessions, workspace.json, or auth sqlite.
+ *
+ * NAS Dirent.isFile()/isDirectory() can be wrong on bind mounts, so the tree
+ * walk uses statSync. The first boot also force-moves any existing cache when
+ * the marker is missing, in case a scan still misses a bad record.
  */
-import { existsSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const MAX_WALK_DEPTH = 8
+
+/** Written after a move (or an inspect of an empty home) so force-once does not repeat. */
+export const PROJCACHE_MIGRATION_MARKER = '.dsh-auth-projcache-identity-v5'
 
 /**
  * @param {unknown} identity
@@ -39,7 +54,7 @@ export function jsonValueHasStaleCheckpointIdentity(value, depth = 0) {
 
 /**
  * @param {string} dshHome
- * @returns {{ storages: string, legacyFile: string, cacheDir: string }}
+ * @returns {{ storages: string, legacyFile: string, cacheDir: string, marker: string }}
  */
 export function sessionProjcachePaths(dshHome) {
   const storages = join(dshHome, 'storages')
@@ -47,6 +62,19 @@ export function sessionProjcachePaths(dshHome) {
     storages,
     legacyFile: join(storages, 'session_projcache.json'),
     cacheDir: join(storages, 'session_projcache'),
+    marker: join(storages, PROJCACHE_MIGRATION_MARKER),
+  }
+}
+
+/**
+ * @param {string} path
+ * @returns {boolean}
+ */
+function isDirectory(path) {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
   }
 }
 
@@ -55,22 +83,22 @@ export function sessionProjcachePaths(dshHome) {
  * @param {string[]} [found]
  * @returns {string[]}
  */
-function walkJsonFiles(dir, found = []) {
-  let entries
+export function walkJsonFiles(dir, found = []) {
+  let names
   try {
-    entries = readdirSync(dir, { withFileTypes: true })
+    names = readdirSync(dir)
   } catch {
     // Unreadable directory (NAS EACCES); skip this branch.
     return found
   }
-  for (const entry of entries) {
-    const path = join(dir, entry.name)
-    if (entry.isDirectory()) {
-      if (entry.name.startsWith('.')) continue
+  for (const name of names) {
+    if (name.startsWith('.')) continue
+    const path = join(dir, name)
+    if (isDirectory(path)) {
       walkJsonFiles(path, found)
       continue
     }
-    if (entry.isFile() && entry.name.endsWith('.json')) found.push(path)
+    if (name.endsWith('.json')) found.push(path)
   }
   return found
 }
@@ -101,12 +129,7 @@ export function jsonFileHasStaleCheckpointIdentity(file) {
 export function sessionProjcacheLooksStale(dshHome) {
   const { legacyFile, cacheDir } = sessionProjcachePaths(dshHome)
   if (existsSync(legacyFile) && jsonFileHasStaleCheckpointIdentity(legacyFile)) return true
-  if (!existsSync(cacheDir)) return false
-  try {
-    if (!statSync(cacheDir).isDirectory()) return false
-  } catch {
-    return false
-  }
+  if (!existsSync(cacheDir) || !isDirectory(cacheDir)) return false
   for (const file of walkJsonFiles(cacheDir)) {
     if (jsonFileHasStaleCheckpointIdentity(file)) return true
   }
@@ -114,11 +137,18 @@ export function sessionProjcacheLooksStale(dshHome) {
 }
 
 /**
- * @param {string} dshHome
- * @returns {string[]} destinations that received a renamed path
+ * @param {string} storages
  */
-export function resetStaleSessionProjcache(dshHome) {
-  if (!sessionProjcacheLooksStale(dshHome)) return []
+function writeMigrationMarker(storages) {
+  mkdirSync(storages, { recursive: true })
+  writeFileSync(join(storages, PROJCACHE_MIGRATION_MARKER), 'identity-v5\n')
+}
+
+/**
+ * @param {string} dshHome
+ * @returns {string[]}
+ */
+function renameSessionProjcache(dshHome) {
   const { legacyFile, cacheDir } = sessionProjcachePaths(dshHome)
   const stamp = Date.now()
   const moved = []
@@ -131,9 +161,31 @@ export function resetStaleSessionProjcache(dshHome) {
   return moved
 }
 
+/**
+ * @param {string} dshHome
+ * @param {{ forceOnce?: boolean }} [options]
+ * @returns {string[]} destinations that received a renamed path
+ */
+export function resetStaleSessionProjcache(dshHome, options = {}) {
+  const forceOnce = options.forceOnce !== false
+  const { storages, legacyFile, cacheDir, marker } = sessionProjcachePaths(dshHome)
+  const stale = sessionProjcacheLooksStale(dshHome)
+  const hasCache = existsSync(legacyFile) || (existsSync(cacheDir) && isDirectory(cacheDir))
+  const force = forceOnce && !existsSync(marker) && hasCache
+  if (!stale && !force) {
+    if (forceOnce && !existsSync(marker) && existsSync(storages)) writeMigrationMarker(storages)
+    return []
+  }
+  const moved = renameSessionProjcache(dshHome)
+  writeMigrationMarker(storages)
+  return moved
+}
+
 function main() {
   const home = process.env.DSH_HOME
   if (home === undefined || home.length === 0) process.exit(0)
+  const { marker } = sessionProjcachePaths(home)
+  const hadMarker = existsSync(marker)
   let moved
   try {
     moved = resetStaleSessionProjcache(home)
@@ -143,8 +195,11 @@ function main() {
     process.exit(0)
   }
   if (moved.length === 0) return
+  const reason = hadMarker
+    ? 'stale 0.1.2 identity schema'
+    : 'one-shot 0.1.2 identity migration'
   process.stderr.write(
-    `dsh-auth: moved stale session projection cache (DSH 0.1.2 identity schema); sessions/*.jsonl kept: ${moved.join(', ')}\n`,
+    `dsh-auth: moved session projection cache (${reason}); sessions/*.jsonl kept: ${moved.join(', ')}\n`,
   )
 }
 

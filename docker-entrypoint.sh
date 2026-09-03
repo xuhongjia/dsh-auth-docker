@@ -101,74 +101,19 @@ tighten_credentials_mode
 # under /opt/plugins into the `web` profile. Re-running on a persisted volume
 # is idempotent. Do not crash-loop the public proxy if an already-installed
 # profile tree still fails to reconcile — boot dsh so /login stays up.
+# Docker logs are not a TTY: pnpm's default progress bar then throws
+# RangeError: Invalid array length (bar width 0 / NaN). append-only is the
+# same reporter CI uses; do not set CI=true here (that also freezes lockfiles).
 for plugin in /opt/plugins/*; do
   [ -d "$plugin" ] || continue
   [ -f "$plugin/package.json" ] || continue
-  if ! dsh plugin --profile web add "$plugin"; then
+  if ! dsh plugin --profile web add "$plugin" --reporter=append-only; then
     echo "dsh-auth: warning: dsh plugin add failed for $plugin; starting dsh anyway" >&2
   fi
 done
 
 repair_patch_overlay "$DSH_HOME/profiles/web/cordis.patch.yml"
 repair_patch_overlay "$DSH_HOME/cordis.patch.yml"
-
-# Official DSH resolves bundles by a directory that contains package.json, not
-# by require.resolve(`${name}/package.json`) (marketplace packages often omit
-# that subpath from "exports"). Restore rows a previous boot stripped while
-# the files were still on disk, reinstall what is genuinely missing, then
-# drop only names that still cannot resolve so loadProfile can boot /login.
-profile_bundles() {
-  PROFILE_DIR="$DSH_HOME/profiles/web" node /usr/local/bin/docker-profile-bundles.mjs "$1"
-}
-
-profile_bundles restore
-
-list_unresolvable_profile_bundles() {
-  profile_bundles list
-}
-
-# Marketplace plugins live in the persisted profile, but their files often
-# vanish after a container recreate (/tmp pnpm store) or a Market restart that
-# killed PID 1 mid-install. Re-run `dsh plugin add` before dropping the row.
-# Never re-fetch deprecated @linxin666/dsh-web-ui-all (last publish 0.3.6):
-# pnpm then warns and can abort with "Invalid array length"; the successor is
-# @linxin666/dsh-web-all. prune + quarantine drop the old layer.
-while IFS= read -r pkg; do
-  [ -n "$pkg" ] || continue
-  case "$pkg" in
-    /*|./*|../*) continue ;;
-    @linxin666/dsh-web-ui-all)
-      echo "dsh-auth: skipping re-add of deprecated $pkg (use @linxin666/dsh-web-all)" >&2
-      continue
-      ;;
-  esac
-  echo "dsh-auth: re-adding unresolvable profile bundle $pkg" >&2
-  if ! dsh plugin --profile web add "$pkg"; then
-    echo "dsh-auth: warning: could not re-add $pkg" >&2
-  fi
-done <<EOF
-$(list_unresolvable_profile_bundles)
-EOF
-
-profile_bundles prune
-
-# dsh 0.1.2 dropped @deepseek-ai/dsh-host-apiproxy. Marketplace
-# @linxin666/dsh-remote-web-ui@0.3.6 (and dsh-web-ui-all that nests it) still
-# imports it; that ERR_MODULE_NOT_FOUND joins the fatal Include AggregateError.
-# 0.3.12 does not import it. Drop the old layer until the user upgrades.
-profile_bundles quarantine
-
-# dsh 0.1.2-alpha.1 deleted named exports that persisted marketplace plugins
-# still static-import. Patch every copy (image + /data profile) before boot.
-node /usr/local/bin/docker-dsh-settings-compat.mjs \
-  /usr/local/lib/node_modules \
-  "$DSH_HOME/profiles/web/node_modules" || true
-
-# Projection cache is derived; sessions/*.jsonl is the authority. DSH 0.1.2
-# bootstrap copies old session_projcache.json records without migrating
-# identity.isSeeded / inheritedEventCount, then Zod aborts the plugin tree.
-# https://github.com/deepseek-ai/deepseek-harness/discussions/5396
-node /usr/local/bin/docker-session-projcache.mjs
 
 # Docker has no useful default browser; --no-open is a CLI flag since the
 # version that prints "opening the default browser". The patch also sets
